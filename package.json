@@ -4,36 +4,107 @@
   "description": "Compile messy dev tasks into structured prompts",
   "version": "0.0.1",
   "engines": {
-  "vscode": "^1.80.0"
-},
+    "vscode": "^1.80.0"
+  },
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:promptCompiler.compile",
+    "onCommand:promptCompiler.setProfile",
+    "onCommand:promptCompiler.compileClipboardOffline",
+    "onCommand:promptCompiler.compileClipboardOnline",
+    "onCommand:promptCompiler.setApiKey",
+    "onCommand:promptCompiler.clearApiKey"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
-  "commands": [
-    {
-      "command": "promptCompiler.compile",
-      "title": "Prompt Compiler: Compile Prompt"
-    },
-    {
-      "command": "promptCompiler.setProfile",
-      "title": "Prompt Compiler: Set Profile"
-    }
-  ],
-    "configuration": {
-    "title": "Prompt Compiler",
-    "properties": {
-      "promptCompiler.profile": {
-        "type": "string",
-        "default": "SWE",
-        "enum": ["SWE", "BUGFIX", "SECURITY"],
-        "description": "Default profile used when compiling prompts."
+    "commands": [
+      {
+        "command": "promptCompiler.compile",
+        "title": "Prompt Compiler: Compile Prompt"
+      },
+      {
+        "command": "promptCompiler.setProfile",
+        "title": "Prompt Compiler: Set Profile"
+      },
+      {
+        "command": "promptCompiler.compileClipboardOffline",
+        "title": "Prompt Compiler: Compile Clipboard (Offline)"
+      },
+      {
+        "command": "promptCompiler.compileClipboardOnline",
+        "title": "Prompt Compiler: Compile Clipboard (Online)"
+      },
+      {
+        "command": "promptCompiler.setApiKey",
+        "title": "Prompt Compiler: Set API Key"
+      },
+      {
+        "command": "promptCompiler.clearApiKey",
+        "title": "Prompt Compiler: Clear API Key"
       }
-    }
-  }
-},
+    ],
+    "configuration": {
+      "title": "Prompt Compiler",
+      "properties": {
+        "promptCompiler.profile": {
+          "type": "string",
+          "default": "SWE",
+          "enum": ["SWE", "BUGFIX", "SECURITY"],
+          "description": "Default profile used when compiling prompts."
+        },
+        "promptCompiler.enableOnline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable online clipboard compilation."
+        },
+        "promptCompiler.confirmBeforeOnlineSend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Confirm before sending clipboard text to an online model."
+        },
+        "promptCompiler.includeEditorSelectionAsContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include active editor selection as optional context for online compilation."
+        },
+        "promptCompiler.maxContextChars": {
+          "type": "number",
+          "default": 12000,
+          "description": "Maximum characters to include from editor selection."
+        },
+        "promptCompiler.provider": {
+          "type": "string",
+          "default": "custom",
+          "enum": ["custom", "openai", "anthropic", "gemini"],
+          "description": "Online provider (currently supports custom/openai-compatible endpoints)."
+        },
+        "promptCompiler.endpoint": {
+          "type": "string",
+          "default": "https://api.openai.com/v1/chat/completions",
+          "description": "OpenAI-compatible chat completions endpoint."
+        },
+        "promptCompiler.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Model name for the online provider."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "promptCompiler.compileClipboardOffline",
+        "key": "ctrl+shift+u",
+        "mac": "cmd+shift+u"
+      },
+      {
+        "command": "promptCompiler.compileClipboardOnline",
+        "key": "ctrl+shift+p",
+        "mac": "cmd+shift+p"
+      }
+    ]
+  },
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "webpack",
