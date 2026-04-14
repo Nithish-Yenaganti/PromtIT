@@ -5,6 +5,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { getEmbedding } from "./memory/embeddings";
+import { getContextualExamples } from "./memory/fewShot";
+import { BASE_REFINER_PROMPT } from "./prompts/base";
+import { savePrompt } from "./memory/db";
+
+
 
 getEmbedding("warmup").catch(()=>{});
 
@@ -33,9 +38,17 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
 // This is where the logic will eventually go
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "prompt_it") {
-    const rawPrompt = request.params.arguments?.prompt;
+    const rawPrompt = request.params.arguments?.prompt as string;
+
+    const examples = await getContextualExamples(rawPrompt)
+    
+    const finalpromt = BASE_REFINER_PROMPT
+      .replace("{example}", examples || "No history found yet.")
+      .replace("{input}", rawPrompt);
+
+
     return {
-      content: [{ type: "text", text: `Prompted version of: ${rawPrompt}` }],
+      content: [{ type: "text", text: `Prompted version of: ${finalpromt}` }],
     };
   }
   throw new Error("Tool not found");
