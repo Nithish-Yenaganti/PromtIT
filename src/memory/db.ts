@@ -34,7 +34,7 @@ export function initDB() {
 /**
  * Helper to save a prompt with its embedding
  */
-export function savePrompt(raw: string, refined: string, embedding: number[]) {
+export function savePrompt(raw: string, refined: string, embedding: number[]):number {
   const stmt = db.prepare(`
     INSERT INTO prompt_history (raw_prompt, refined_prompt, embedding)
     VALUES (?, ?, ?)
@@ -42,5 +42,7 @@ export function savePrompt(raw: string, refined: string, embedding: number[]) {
   
   // Convert the array of numbers to a Buffer for storage
   const buffer = Buffer.from(new Float32Array(embedding).buffer);
-  stmt.run(raw, refined, buffer);
+  const result = stmt.run(raw, refined, buffer);
+
+  return result.lastInsertRowid as number;
 }

@@ -25,7 +25,7 @@ const server = new McpServer(
 server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: "prompt_record_feedback",
+      name: "prompt_it",
       description: "Refines a messy user prompt into a structured, high-quality system prompt/instruction.",
       inputSchema: {
         type: "object",
@@ -33,6 +33,21 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
           prompt: { type: "string", description: "The raw user input prompt" },
         },
         required: ["prompt"],
+      },
+    },
+
+    // The Feedback tool
+    {
+      name: "record_feedback",
+      description: "Records the user's reaction to a refined prompt to improve future refinements.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt_id: { type: "integer", description: "The ID of the prompt being rated." },
+          rating: { type: "integer", description: "1 for good, -1 for bad, 0 for neutral." },
+          user_edits: { type: "string", description: "The final version the user actually used (if they edited it)." },
+        },
+        required: ["prompt_id", "rating"],
       },
     },
   ],
@@ -52,11 +67,11 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // 3. THE MISSING PIECE: Pre-calculate the embedding and save
   // This ensures your history grows every time you use the tool. 
     const currentVector = await getEmbedding(rawPrompt);
-    savePrompt(rawPrompt, finalpromt, currentVector);
+    const promptId = savePrompt(rawPrompt, finalpromt, currentVector);
 
 
     return {
-      content: [{ type: "text", text: `Prompted version of: ${finalpromt}` }],
+      content: [{ type: "text", text: `[PROMPT_ID: ${promptId}]\n Prompted version of: ${finalpromt}` }],
     };
   }
   throw new Error("Tool not found");
@@ -64,3 +79,5 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+process.stderr.write("Testing MCP")
