@@ -4,6 +4,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { getEmbedding } from "./memory/embeddings";
+
+getEmbedding("warmup").catch(()=>{});
 
 const server = new McpServer(
   { name: "prompt-engineer", version: "1.0.0" },
