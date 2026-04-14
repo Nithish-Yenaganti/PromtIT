@@ -46,6 +46,11 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       .replace("{example}", examples || "No history found yet.")
       .replace("{input}", rawPrompt);
 
+  // 3. THE MISSING PIECE: Pre-calculate the embedding and save
+  // This ensures your history grows every time you use the tool. 
+    const currentVector = await getEmbedding(rawPrompt);
+    savePrompt(rawPrompt, finalpromt, currentVector);
+
 
     return {
       content: [{ type: "text", text: `Prompted version of: ${finalpromt}` }],
