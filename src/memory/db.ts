@@ -15,7 +15,7 @@ export function initDB() {
       raw_prompt TEXT NOT NULL,
       refined_prompt TEXT NOT NULL,
       embedding BLOB,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) STRICT;
   `);
 
