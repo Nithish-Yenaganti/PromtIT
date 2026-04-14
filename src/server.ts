@@ -7,11 +7,14 @@ import {
 import { getEmbedding } from "./memory/embeddings";
 import { getContextualExamples } from "./memory/fewShot";
 import { BASE_REFINER_PROMPT } from "./prompts/base";
-import { savePrompt } from "./memory/db";
+import { initDB, savePrompt } from "./memory/db";
 
 
+initDB();
 
-getEmbedding("warmup").catch(()=>{});
+getEmbedding("warmup").catch((err) => {
+  process.stderr.write(`Warmup alert: ${err.message}\n`);
+});
 
 const server = new McpServer(
   { name: "prompt-engineer", version: "1.0.0" },
@@ -22,7 +25,7 @@ const server = new McpServer(
 server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: "prompt_it",
+      name: "prompt_record_feedback",
       description: "Refines a messy user prompt into a structured, high-quality system prompt/instruction.",
       inputSchema: {
         type: "object",
