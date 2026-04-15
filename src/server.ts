@@ -57,7 +57,7 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const examples = await getContextualExamples(rawPrompt)
     
     const finalpromt = BASE_REFINER_PROMPT
-      .replace("{example}", examples || "No history found yet.")
+      .replace("{examples}", examples || "No history found yet.")
       .replace("{input}", rawPrompt);
 
   // 3. THE MISSING PIECE: Pre-calculate the embedding and save
