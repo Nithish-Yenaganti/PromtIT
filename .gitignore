@@ -22,6 +22,9 @@ coverage/
 .cache/
 .turbo/
 .next/
+data/*.db
+data/*.db-shm
+data/*.db-wal
 
 # TypeScript
 *.tsbuildinfo

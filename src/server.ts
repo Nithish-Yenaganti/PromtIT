@@ -23,6 +23,9 @@ type FeedbackArgs = {
   userEdits?: string;
 };
 
+const MAX_PROMPT_CHARS = 16000;
+const MAX_USER_EDITS_CHARS = 16000;
+
 function parseFeedbackArgs(input: unknown): FeedbackArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const promptIdRaw = args.prompt_id;
@@ -39,6 +42,9 @@ function parseFeedbackArgs(input: unknown): FeedbackArgs {
 
   if (userEditsRaw !== undefined && typeof userEditsRaw !== "string") {
     throw new Error("user_edits must be a string when provided.");
+  }
+  if (typeof userEditsRaw === "string" && userEditsRaw.length > MAX_USER_EDITS_CHARS) {
+    throw new Error(`user_edits exceeds ${MAX_USER_EDITS_CHARS} characters.`);
   }
 
   return {
@@ -83,7 +89,13 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
 // This is where the logic will eventually go
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "prompt_it") {
-    const rawPrompt = request.params.arguments?.prompt as string;
+    const rawPrompt = request.params.arguments?.prompt;
+    if (typeof rawPrompt !== "string" || !rawPrompt.trim()) {
+      throw new Error("prompt must be a non-empty string.");
+    }
+    if (rawPrompt.length > MAX_PROMPT_CHARS) {
+      throw new Error(`prompt exceeds ${MAX_PROMPT_CHARS} characters.`);
+    }
     const currentVector = await getEmbedding(rawPrompt);
 
     const examples = await getContextualExamples(rawPrompt, currentVector);
@@ -108,8 +120,10 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{ type: "text", text: "Feedback recorded. Your personal model is learning!" }]
       };
     } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`record_feedback failed: ${message}\n`);
       return {
-        content: [{ type: "text", text: `Error saving feedback: ${error.message}` }],
+        content: [{ type: "text", text: "Unable to record feedback right now." }],
         isError: true
       };
     }
