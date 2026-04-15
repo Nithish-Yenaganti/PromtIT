@@ -33,6 +33,18 @@ export function initDB() {
       FOREIGN KEY(prompt_id) REFERENCES prompt_history(id)
     ) STRICT;
   `);
+
+  ensureFeedbackSchema();
+}
+
+function ensureFeedbackSchema() {
+  const columns = db.prepare("PRAGMA table_info(feedback)").all() as Array<{ name?: string }>;
+  const hasEditDistance = columns.some((col) => col.name === "edit_distance");
+
+  // Existing DBs created before edit_distance was introduced need a one-time migration.
+  if (!hasEditDistance) {
+    db.run("ALTER TABLE feedback ADD COLUMN edit_distance INTEGER");
+  }
 }
 
 /**
