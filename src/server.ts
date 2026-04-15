@@ -86,7 +86,7 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-// This is where the logic will eventually go
+// This is where the logic will eventually 
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "prompt_it") {
     const rawPrompt = request.params.arguments?.prompt;
