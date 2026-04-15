@@ -46,3 +46,13 @@ export function savePrompt(raw: string, refined: string, embedding: number[]):nu
 
   return result.lastInsertRowid as number;
 }
+
+export function saveFeedback(promptId: number, rating: number, userEdits?: string): number {
+  const stmt = db.prepare(`
+    INSERT INTO feedback (prompt_id, rating, user_edits)
+    VALUES (?, ?, ?)
+  `);
+
+  const result = stmt.run(promptId, rating, userEdits ?? null);
+  return result.lastInsertRowid as number;
+}
