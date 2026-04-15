@@ -7,6 +7,8 @@ export const db = new Database(DB_PATH, { create: true });
 // Setup high-performance mode
 db.run("PRAGMA journal_mode = WAL;");
 db.run("PRAGMA busy_timeout = 5000;"); //wait up to 5s i DB is busy
+db.run("PRAGMA foreign_keys = ON;");
+
 
 export function initDB() {
   // table for prompts and their "meaning" (embeddings)
@@ -24,9 +26,10 @@ export function initDB() {
   db.run(`
     CREATE TABLE IF NOT EXISTS feedback (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      prompt_id INTEGER,
+      prompt_id INTEGER NOT NULL,
       rating INTEGER CHECK (rating BETWEEN -1 AND 1),
       user_edits TEXT,
+      edit_distance INTEGER,
       FOREIGN KEY(prompt_id) REFERENCES prompt_history(id)
     ) STRICT;
   `);
