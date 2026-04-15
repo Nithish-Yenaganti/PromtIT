@@ -213,7 +213,15 @@ async function refineWithSampling(
       };
     }
 
-    return { ok: false, message: `Unable to refine prompt. ${localResult.message}` };
+    const hasModelPathIssue =
+      localResult.message.includes("Could not locate file") ||
+      localResult.message.includes("404") ||
+      localResult.message.includes("not found");
+    const modelHint = hasModelPathIssue
+      ? " Set PROMPTIT_LOCAL_REFINER_MODEL to a valid model like onnx-community/Llama-3.2-1B-Instruct-ONNX."
+      : "";
+
+    return { ok: false, message: `Unable to refine prompt. ${localResult.message}${modelHint}` };
   }
 }
 

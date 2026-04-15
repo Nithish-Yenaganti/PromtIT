@@ -6,7 +6,7 @@ type LocalRefineResult =
 
 const LOCAL_REFINER_MODEL =
   process.env.PROMPTIT_LOCAL_REFINER_MODEL?.trim() ||
-  "onnx-community/Llama-3.2-1B-Instruct";
+  "onnx-community/Llama-3.2-1B-Instruct-ONNX";
 const LOCAL_ONLY_MODELS = process.env.PROMPTIT_LOCAL_MODELS_ONLY === "1";
 const MAX_NEW_TOKENS = Number(
   process.env.PROMPTIT_LOCAL_REFINER_MAX_TOKENS?.trim() || "900"
