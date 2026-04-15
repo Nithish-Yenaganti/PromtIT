@@ -2,7 +2,8 @@ import { pipeline } from "@xenova/transformers";
 
 let extractor: any = null;
 let extractorInitPromise: Promise<any> | null = null;
-const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+const EMBEDDING_MODEL = process.env.PROMPTIT_EMBEDDING_MODEL?.trim() || "Xenova/all-MiniLM-L6-v2";
+const LOCAL_ONLY_MODELS = process.env.PROMPTIT_LOCAL_MODELS_ONLY === "1";
 
 async function ensureExtractor(): Promise<any> {
   if (extractor) return extractor;
@@ -10,7 +11,9 @@ async function ensureExtractor(): Promise<any> {
   if (!extractorInitPromise) {
     extractorInitPromise = (async () => {
       process.stderr.write("Loading embedding model...\n");
-      const loaded = await pipeline("feature-extraction", EMBEDDING_MODEL);
+      const loaded = await pipeline("feature-extraction", EMBEDDING_MODEL, {
+        local_files_only: LOCAL_ONLY_MODELS,
+      });
       process.stderr.write("Embedding model ready.\n");
       extractor = loaded;
       return loaded;

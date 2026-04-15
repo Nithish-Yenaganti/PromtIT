@@ -1,7 +1,12 @@
 import { Database } from "bun:sqlite";
 import path from "path";
+import { mkdirSync } from "fs";
+import os from "os";
 
-const DB_PATH = path.join(import.meta.dir, "../../data/memory.db");
+const defaultDbDir = path.join(os.homedir(), ".promptit");
+const configuredPath = process.env.PROMPTIT_DB_PATH?.trim();
+const DB_PATH = configuredPath || path.join(defaultDbDir, "memory.db");
+mkdirSync(path.dirname(DB_PATH), { recursive: true });
 export const db = new Database(DB_PATH, { create: true });
 
 // Setup high-performance mode
