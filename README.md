@@ -1,6 +1,6 @@
-# Prompt Refiner MCP Server
+# PromptIT MCP Server
 
-The Prompt Refiner is a local-first Model Context Protocol (MCP) server designed to act as a specialized bridge between a developer and an AI agent. It transforms unstructured, conversational requests into high-fidelity instructions by leveraging a persistent local memory.
+The PromptIT is a local-first Model Context Protocol (MCP) server designed to act as a specialized bridge between a developer and an AI agent. It transforms unstructured, conversational requests into high-fidelity instructions by leveraging a persistent local memory.
 
 ## Core Logic
 
