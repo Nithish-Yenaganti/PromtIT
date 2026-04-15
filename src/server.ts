@@ -8,7 +8,7 @@ import { getEmbedding } from "./memory/embeddings";
 import { getContextualExamples } from "./memory/fewShot";
 import { BASE_REFINER_PROMPT } from "./prompts/base";
 import { initDB, savePrompt } from "./memory/db";
-
+import { recordFeedback } from "./tools/recordFeedback";  
 
 initDB();
 
@@ -74,10 +74,20 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       content: [{ type: "text", text: `[PROMPT_ID: ${promptId}]\n Prompted version of: ${finalpromt}` }],
     };
   }
-  if (request.params.name == "record_feedback"){
-
+  if (request.params.name === "record_feedback") {
+    const { prompt_id, rating, user_edits } = request.params.arguments as any;
     
-
+    try {
+      recordFeedback(prompt_id, rating, user_edits);
+      return {
+        content: [{ type: "text", text: "Feedback recorded. Your personal model is learning!" }]
+      };
+    } catch (error: any) {
+      return {
+        content: [{ type: "text", text: `Error saving feedback: ${error.message}` }],
+        isError: true
+      };
+    }
   }
 
   throw new Error("Tool not found");
