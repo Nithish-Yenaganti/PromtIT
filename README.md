@@ -27,3 +27,10 @@ By utilizing the Model Context Protocol instead of a standard text-based instruc
 * Stateful Memory: It maintains a history that persists across different chat sessions and different AI agents.
 * Computational Logic: It can perform complex string math and database queries that are outside the scope of standard LLM context windows.
 * Privacy: All data processing, including vectorization and storage, occurs on the local machine. No prompt history is sent to a third-party database for the purpose of refinement matching.
+
+## Quick Start
+
+```bash
+bun install
+bun run ./src/server.ts
+```
