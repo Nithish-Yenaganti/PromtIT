@@ -34,3 +34,18 @@ By utilizing the Model Context Protocol instead of a standard text-based instruc
 bun install
 bun run ./src/server.ts
 ```
+
+## Fallback Behavior (Sampling -> Local Llama)
+
+PromptIT tries MCP `sampling/createMessage` first. If the host does not support sampling, it falls back to a local model using Transformers.js:
+
+- Default local model: `onnx-community/Llama-3.2-1B-Instruct`
+- On first fallback, model files may download to local cache and take time.
+
+Optional overrides:
+
+```bash
+PROMPTIT_LOCAL_REFINER_MODEL=onnx-community/Llama-3.2-1B-Instruct
+PROMPTIT_LOCAL_MODELS_ONLY=0
+PROMPTIT_LOCAL_REFINER_MAX_TOKENS=900
+```
