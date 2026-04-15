@@ -12,7 +12,19 @@ export async function getContextualExamples(currentPrompt: string) {
     .map(row => {
         
       if (!row || !row.embedding) return null;
-      const rowVector = new Float32Array(row.embedding.buffer);
+
+
+      const bytes = row.embedding as Uint8Array; // Buffer is a Uint8Array in Bun/Node
+      if (bytes.byteLength % 4 !== 0) return null; // invalid float32 payload
+
+      const rowVector = new Float32Array(
+        bytes.buffer,
+        bytes.byteOffset,
+        bytes.byteLength / 4
+      );
+
+
+
       if (rowVector.length !== currentVector.length) return null;
       const similarity = dotProduct(currentVector, rowVector);
       return { ...row, similarity };
