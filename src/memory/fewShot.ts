@@ -1,8 +1,8 @@
 import { db } from "./db.js";
 import { getEmbedding } from "./embeddings.js";
 
-export async function getContextualExamples(currentPrompt: string) {
-  const currentVector = await getEmbedding(currentPrompt);
+export async function getContextualExamples(currentPrompt: string, providedVector?: number[]) {
+  const currentVector = providedVector ?? await getEmbedding(currentPrompt);
   
   // We pull the last 50 prompts to compare
   const history = db.prepare("SELECT raw_prompt, refined_prompt, embedding FROM prompt_history ORDER BY created_at DESC LIMIT 50").all() as any[];

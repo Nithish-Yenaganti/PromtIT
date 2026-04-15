@@ -84,16 +84,15 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "prompt_it") {
     const rawPrompt = request.params.arguments?.prompt as string;
+    const currentVector = await getEmbedding(rawPrompt);
 
-    const examples = await getContextualExamples(rawPrompt)
+    const examples = await getContextualExamples(rawPrompt, currentVector);
     
     const finalpromt = BASE_REFINER_PROMPT
       .replace("{examples}", examples || "No history found yet.")
       .replace("{input}", rawPrompt);
 
-  // 3. THE MISSING PIECE: Pre-calculate the embedding and save
-  // This ensures your history grows every time you use the tool. 
-    const currentVector = await getEmbedding(rawPrompt);
+  // Save prompt + embedding so memory can improve future refinements.
     const promptId = savePrompt(rawPrompt, finalpromt, currentVector);
 
 
