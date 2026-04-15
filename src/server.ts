@@ -17,6 +17,37 @@ const server = new McpServer(
   { capabilities: { tools: {} } }
 );
 
+type FeedbackArgs = {
+  promptId: number;
+  rating: -1 | 0 | 1;
+  userEdits?: string;
+};
+
+function parseFeedbackArgs(input: unknown): FeedbackArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const promptIdRaw = args.prompt_id;
+  const ratingRaw = args.rating;
+  const userEditsRaw = args.user_edits;
+
+  if (typeof promptIdRaw !== "number" || !Number.isInteger(promptIdRaw) || promptIdRaw <= 0) {
+    throw new Error("prompt_id must be a positive integer.");
+  }
+
+  if (typeof ratingRaw !== "number" || !Number.isInteger(ratingRaw) || ![-1, 0, 1].includes(ratingRaw)) {
+    throw new Error("rating must be one of: -1, 0, 1.");
+  }
+
+  if (userEditsRaw !== undefined && typeof userEditsRaw !== "string") {
+    throw new Error("user_edits must be a string when provided.");
+  }
+
+  return {
+    promptId: promptIdRaw,
+    rating: ratingRaw as -1 | 0 | 1,
+    userEdits: userEditsRaw,
+  };
+}
+
 // This tells the AI what tools are available
 server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
@@ -71,10 +102,9 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
   if (request.params.name === "record_feedback") {
-    const { prompt_id, rating, user_edits } = request.params.arguments as any;
-    
     try {
-      recordFeedback(prompt_id, rating, user_edits);
+      const { promptId, rating, userEdits } = parseFeedbackArgs(request.params.arguments);
+      recordFeedback(promptId, rating, userEdits);
       return {
         content: [{ type: "text", text: "Feedback recorded. Your personal model is learning!" }]
       };
