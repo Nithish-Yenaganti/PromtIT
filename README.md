@@ -40,12 +40,15 @@ bun run ./src/server.ts
 PromptIT tries MCP `sampling/createMessage` first. If the host does not support sampling, it falls back to a local model using Transformers.js:
 
 - Default local model: `onnx-community/Llama-3.2-1B-Instruct`
+- Default local model: `onnx-community/Llama-3.2-1B-Instruct-ONNX`
 - On first fallback, model files may download to local cache and take time.
 
 Optional overrides:
 
 ```bash
-PROMPTIT_LOCAL_REFINER_MODEL=onnx-community/Llama-3.2-1B-Instruct
+PROMPTIT_LOCAL_REFINER_MODEL=onnx-community/Llama-3.2-1B-Instruct-ONNX
+# Alternative quantized variant:
+# PROMPTIT_LOCAL_REFINER_MODEL=onnx-community/Llama-3.2-1B-Instruct-q4f16
 PROMPTIT_LOCAL_MODELS_ONLY=0
 PROMPTIT_LOCAL_REFINER_MAX_TOKENS=900
 ```
