@@ -7,7 +7,16 @@ import {
 import { getEmbedding, startEmbeddingWarmup } from "./memory/embeddings";
 import { getContextualExamples } from "./memory/fewShot";
 import { BASE_REFINER_PROMPT } from "./prompts/base";
-import { initDB, savePrompt } from "./memory/db";
+import {
+  createRefinementSession,
+  editRefinementSession,
+  getLatestHistoryPromptId,
+  getRefinementSession,
+  initDB,
+  markRefinementAccepted,
+  savePrompt,
+  updateRefinementSession,
+} from "./memory/db";
 import { recordFeedback } from "./tools/recordFeedback";  
 
 initDB();
@@ -18,13 +27,18 @@ const server = new McpServer(
 );
 
 type FeedbackArgs = {
-  promptId: number;
+  promptId?: number;
   rating: -1 | 0 | 1;
   userEdits?: string;
 };
+type PromptArgs = { prompt: string };
+type RetryArgs = { promptId: number; retryNote?: string };
+type AcceptArgs = { promptId: number };
+type EditArgs = { promptId: number; editedPrompt: string };
 
 const MAX_PROMPT_CHARS = 16000;
 const MAX_USER_EDITS_CHARS = 16000;
+const MAX_RETRY_NOTE_CHARS = 2000;
 
 function extractSampledText(content: unknown): string {
   if (Array.isArray(content)) {
@@ -62,8 +76,8 @@ function parseFeedbackArgs(input: unknown): FeedbackArgs {
   const ratingRaw = args.rating;
   const userEditsRaw = args.user_edits;
 
-  if (typeof promptIdRaw !== "number" || !Number.isInteger(promptIdRaw) || promptIdRaw <= 0) {
-    throw new Error("prompt_id must be a positive integer.");
+  if (promptIdRaw !== undefined && (typeof promptIdRaw !== "number" || !Number.isInteger(promptIdRaw) || promptIdRaw <= 0)) {
+    throw new Error("prompt_id must be a positive integer when provided.");
   }
 
   if (typeof ratingRaw !== "number" || !Number.isInteger(ratingRaw) || ![-1, 0, 1].includes(ratingRaw)) {
@@ -78,10 +92,127 @@ function parseFeedbackArgs(input: unknown): FeedbackArgs {
   }
 
   return {
-    promptId: promptIdRaw,
+    promptId: promptIdRaw as number | undefined,
     rating: ratingRaw as -1 | 0 | 1,
     userEdits: userEditsRaw,
   };
+}
+
+function parsePromptArgs(input: unknown): PromptArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const rawPrompt = args.prompt;
+  if (typeof rawPrompt !== "string" || !rawPrompt.trim()) {
+    throw new Error("prompt must be a non-empty string.");
+  }
+  if (rawPrompt.length > MAX_PROMPT_CHARS) {
+    throw new Error(`prompt exceeds ${MAX_PROMPT_CHARS} characters.`);
+  }
+  return { prompt: rawPrompt };
+}
+
+function parseRetryArgs(input: unknown): RetryArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const promptIdRaw = args.prompt_id;
+  const retryNoteRaw = args.retry_note;
+
+  if (typeof promptIdRaw !== "number" || !Number.isInteger(promptIdRaw) || promptIdRaw <= 0) {
+    throw new Error("prompt_id must be a positive integer.");
+  }
+  if (retryNoteRaw !== undefined && typeof retryNoteRaw !== "string") {
+    throw new Error("retry_note must be a string when provided.");
+  }
+  if (typeof retryNoteRaw === "string" && retryNoteRaw.length > MAX_RETRY_NOTE_CHARS) {
+    throw new Error(`retry_note exceeds ${MAX_RETRY_NOTE_CHARS} characters.`);
+  }
+
+  return { promptId: promptIdRaw, retryNote: retryNoteRaw };
+}
+
+function parseAcceptArgs(input: unknown): AcceptArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const promptIdRaw = args.prompt_id;
+  if (typeof promptIdRaw !== "number" || !Number.isInteger(promptIdRaw) || promptIdRaw <= 0) {
+    throw new Error("prompt_id must be a positive integer.");
+  }
+  return { promptId: promptIdRaw };
+}
+
+function parseEditArgs(input: unknown): EditArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const promptIdRaw = args.prompt_id;
+  const editedPromptRaw = args.edited_prompt;
+
+  if (typeof promptIdRaw !== "number" || !Number.isInteger(promptIdRaw) || promptIdRaw <= 0) {
+    throw new Error("prompt_id must be a positive integer.");
+  }
+  if (typeof editedPromptRaw !== "string" || !editedPromptRaw.trim()) {
+    throw new Error("edited_prompt must be a non-empty string.");
+  }
+  if (editedPromptRaw.length > MAX_PROMPT_CHARS) {
+    throw new Error(`edited_prompt exceeds ${MAX_PROMPT_CHARS} characters.`);
+  }
+
+  return { promptId: promptIdRaw, editedPrompt: editedPromptRaw };
+}
+
+function formatPreview(promptId: number, candidatePrompt: string): string {
+  return [
+    "Preview",
+    "",
+    candidatePrompt,
+    "",
+    `Actions: Accept | Regenerate | Edit (prompt_id: ${promptId})`,
+  ].join("\n");
+}
+
+async function refineWithSampling(
+  serverInstance: McpServer,
+  rawPrompt: string,
+  examples: string,
+  retryNote?: string
+): Promise<{ ok: true; refinedPrompt: string } | { ok: false; message: string }> {
+  const retrySection =
+    typeof retryNote === "string" && retryNote.trim()
+      ? `\n\n### RETRY INSTRUCTION:\n${retryNote.trim()}`
+      : "";
+
+  const refinementRequest = BASE_REFINER_PROMPT
+    .replace("{examples}", examples || "No history found yet.")
+    .replace("{input}", `${rawPrompt}${retrySection}`);
+
+  try {
+    const sampled = await serverInstance.server.createMessage({
+      systemPrompt:
+        "Act as an expert prompt engineer. Convert messy requests into a clear, execution-ready prompt. Return only the refined prompt text.",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: refinementRequest,
+          },
+        },
+      ],
+      includeContext: "thisServer",
+      temperature: 0.2,
+      maxTokens: 900,
+    });
+    return { ok: true, refinedPrompt: extractSampledText(sampled.content) };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+    const isSamplingCapabilityError =
+      lower.includes("does not support sampling") ||
+      lower.includes("sampling/createmessage") ||
+      lower.includes("method not found") ||
+      lower.includes("-32601");
+    return {
+      ok: false,
+      message: isSamplingCapabilityError
+        ? "Unable to refine: connected MCP host does not support sampling/createMessage."
+        : `Unable to refine prompt via sampling: ${message}`,
+    };
+  }
 }
 
 // This tells the AI what tools are available
@@ -89,13 +220,48 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "prompt_it",
-      description: "Refines a messy user prompt into a structured, high-quality system prompt/instruction.",
+      description: "Refines a messy user prompt and returns a review preview with accept/regenerate/edit actions.",
       inputSchema: {
         type: "object",
         properties: {
           prompt: { type: "string", description: "The raw user input prompt" },
         },
         required: ["prompt"],
+      },
+    },
+    {
+      name: "retry_refinement",
+      description: "Regenerates the candidate prompt using optional retry guidance.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt_id: { type: "integer", description: "The ID returned by prompt_it." },
+          retry_note: { type: "string", description: "How to improve the next candidate." },
+        },
+        required: ["prompt_id"],
+      },
+    },
+    {
+      name: "edit_refined_prompt",
+      description: "Replaces the candidate prompt with a user-edited version for review.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt_id: { type: "integer", description: "The ID returned by prompt_it." },
+          edited_prompt: { type: "string", description: "The manually edited candidate prompt." },
+        },
+        required: ["prompt_id", "edited_prompt"],
+      },
+    },
+    {
+      name: "accept_refined_prompt",
+      description: "Accepts the candidate prompt, persists it to memory, and returns final prompt text only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt_id: { type: "integer", description: "The ID returned by prompt_it." },
+        },
+        required: ["prompt_id"],
       },
     },
 
@@ -106,11 +272,11 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          prompt_id: { type: "integer", description: "The ID of the prompt being rated." },
+          prompt_id: { type: "integer", description: "The ID of the prompt being rated. Optional when latest accepted prompt should be used." },
           rating: { type: "integer", description: "1 for good, -1 for bad, 0 for neutral." },
           user_edits: { type: "string", description: "The final version the user actually used (if they edited it)." },
         },
-        required: ["prompt_id", "rating"],
+        required: ["rating"],
       },
     },
   ],
@@ -119,73 +285,87 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
 // This is where the logic will eventually 
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "prompt_it") {
-    const rawPrompt = request.params.arguments?.prompt;
-    if (typeof rawPrompt !== "string" || !rawPrompt.trim()) {
-      throw new Error("prompt must be a non-empty string.");
-    }
-    if (rawPrompt.length > MAX_PROMPT_CHARS) {
-      throw new Error(`prompt exceeds ${MAX_PROMPT_CHARS} characters.`);
-    }
+    const { prompt: rawPrompt } = parsePromptArgs(request.params.arguments);
     const currentVector = await getEmbedding(rawPrompt);
-
     const examples = await getContextualExamples(rawPrompt, currentVector);
-
-    const refinementRequest = BASE_REFINER_PROMPT
-      .replace("{examples}", examples || "No history found yet.")
-      .replace("{input}", rawPrompt);
-
-    let refinedPrompt: string;
-    try {
-      const sampled = await server.server.createMessage({
-        systemPrompt:
-          "Act as an expert prompt engineer. Convert messy requests into a clear, execution-ready prompt. Return only the refined prompt text.",
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: refinementRequest,
-            },
-          },
-        ],
-        includeContext: "thisServer",
-        temperature: 0.2,
-        maxTokens: 900,
-      });
-      refinedPrompt = extractSampledText(sampled.content);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      const lower = message.toLowerCase();
-      const isSamplingCapabilityError =
-        lower.includes("does not support sampling") ||
-        lower.includes("sampling/createmessage") ||
-        lower.includes("method not found") ||
-        lower.includes("-32601");
+    const refined = await refineWithSampling(server, rawPrompt, examples || "");
+    if (!refined.ok) {
       return {
-        content: [
-          {
-            type: "text",
-            text: isSamplingCapabilityError
-              ? "Unable to refine: connected MCP host does not support sampling/createMessage."
-              : `Unable to refine prompt via sampling: ${message}`,
-          },
-        ],
+        content: [{ type: "text", text: refined.message }],
         isError: true,
       };
     }
 
-    // Save prompt + embedding so memory can improve future refinements.
-    const promptId = savePrompt(rawPrompt, refinedPrompt, currentVector);
+    const promptId = createRefinementSession(rawPrompt, refined.refinedPrompt);
+    return {
+      content: [{ type: "text", text: formatPreview(promptId, refined.refinedPrompt) }],
+    };
+  }
+  if (request.params.name === "retry_refinement") {
+    const { promptId, retryNote } = parseRetryArgs(request.params.arguments);
+    const session = getRefinementSession(promptId);
+    if (!session) {
+      throw new Error(`No refinement session found for prompt_id ${promptId}.`);
+    }
+    if (session.status === "accepted") {
+      throw new Error("This prompt is already accepted. Create a new prompt_it request for further changes.");
+    }
 
+    const currentVector = await getEmbedding(session.raw_prompt);
+    const examples = await getContextualExamples(session.raw_prompt, currentVector);
+    const refined = await refineWithSampling(server, session.raw_prompt, examples || "", retryNote);
+    if (!refined.ok) {
+      return {
+        content: [{ type: "text", text: refined.message }],
+        isError: true,
+      };
+    }
+
+    updateRefinementSession(promptId, refined.refinedPrompt, retryNote);
+    return {
+      content: [{ type: "text", text: formatPreview(promptId, refined.refinedPrompt) }],
+    };
+  }
+  if (request.params.name === "edit_refined_prompt") {
+    const { promptId, editedPrompt } = parseEditArgs(request.params.arguments);
+    const session = getRefinementSession(promptId);
+    if (!session) {
+      throw new Error(`No refinement session found for prompt_id ${promptId}.`);
+    }
+    if (session.status === "accepted") {
+      throw new Error("This prompt is already accepted. Create a new prompt_it request for further changes.");
+    }
+
+    editRefinementSession(promptId, editedPrompt, "manual edit");
+    return {
+      content: [{ type: "text", text: formatPreview(promptId, editedPrompt) }],
+    };
+  }
+  if (request.params.name === "accept_refined_prompt") {
+    const { promptId } = parseAcceptArgs(request.params.arguments);
+    const session = getRefinementSession(promptId);
+    if (!session) {
+      throw new Error(`No refinement session found for prompt_id ${promptId}.`);
+    }
+
+    if (session.status !== "accepted") {
+      const embedding = await getEmbedding(session.raw_prompt);
+      savePrompt(session.raw_prompt, session.candidate_prompt, embedding);
+      markRefinementAccepted(promptId);
+    }
 
     return {
-      content: [{ type: "text", text: `[PROMPT_ID: ${promptId}]\n${refinedPrompt}` }],
+      content: [{ type: "text", text: session.candidate_prompt }],
     };
   }
   if (request.params.name === "record_feedback") {
     try {
       const { promptId, rating, userEdits } = parseFeedbackArgs(request.params.arguments);
-      recordFeedback(promptId, rating, userEdits);
+      const resolvedPromptId = promptId ?? getLatestHistoryPromptId();
+      if (!resolvedPromptId) {
+        throw new Error("No accepted prompt found to associate feedback with.");
+      }
+      recordFeedback(resolvedPromptId, rating, userEdits);
       return {
         content: [{ type: "text", text: "Feedback recorded. Your personal model is learning!" }]
       };
@@ -206,4 +386,4 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 startEmbeddingWarmup();
 
-process.stderr.write("Testing MCP")
+process.stderr.write("MCP server connected.\n");

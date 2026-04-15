@@ -39,7 +39,22 @@ export function initDB() {
     ) STRICT;
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS refinement_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      raw_prompt TEXT NOT NULL,
+      candidate_prompt TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'needs_review' CHECK (status IN ('needs_review', 'accepted', 'rejected')),
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_retry_note TEXT,
+      last_edit_note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) STRICT;
+  `);
+
   ensureFeedbackSchema();
+  ensureRefinementQueueSchema();
 }
 
 function ensureFeedbackSchema() {
@@ -49,6 +64,23 @@ function ensureFeedbackSchema() {
   // Existing DBs created before edit_distance was introduced need a one-time migration.
   if (!hasEditDistance) {
     db.run("ALTER TABLE feedback ADD COLUMN edit_distance INTEGER");
+  }
+}
+
+function ensureRefinementQueueSchema() {
+  const columns = db.prepare("PRAGMA table_info(refinement_queue)").all() as Array<{ name?: string }>;
+  const existing = new Set(columns.map((col) => col.name).filter((name): name is string => Boolean(name)));
+  const requiredColumns: Array<{ name: string; def: string }> = [
+    { name: "retry_count", def: "INTEGER NOT NULL DEFAULT 0" },
+    { name: "last_retry_note", def: "TEXT" },
+    { name: "last_edit_note", def: "TEXT" },
+    { name: "updated_at", def: "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP" },
+  ];
+
+  for (const col of requiredColumns) {
+    if (!existing.has(col.name)) {
+      db.run(`ALTER TABLE refinement_queue ADD COLUMN ${col.name} ${col.def}`);
+    }
   }
 }
 
@@ -66,4 +98,84 @@ export function savePrompt(raw: string, refined: string, embedding: number[]):nu
   const result = stmt.run(raw, refined, buffer);
 
   return result.lastInsertRowid as number;
+}
+
+export type RefinementSession = {
+  id: number;
+  raw_prompt: string;
+  candidate_prompt: string;
+  status: "needs_review" | "accepted" | "rejected";
+  retry_count: number;
+  last_retry_note?: string | null;
+  last_edit_note?: string | null;
+};
+
+export function createRefinementSession(rawPrompt: string, candidatePrompt: string): number {
+  const stmt = db.prepare(`
+    INSERT INTO refinement_queue (raw_prompt, candidate_prompt, status)
+    VALUES (?, ?, 'needs_review')
+  `);
+  const result = stmt.run(rawPrompt, candidatePrompt);
+  return result.lastInsertRowid as number;
+}
+
+export function getRefinementSession(id: number): RefinementSession | null {
+  const row = db
+    .prepare(
+      `SELECT id, raw_prompt, candidate_prompt, status, retry_count, last_retry_note, last_edit_note FROM refinement_queue WHERE id = ?`
+    )
+    .get(id) as RefinementSession | undefined;
+  return row ?? null;
+}
+
+export function updateRefinementSession(
+  id: number,
+  candidatePrompt: string,
+  retryNote?: string
+): void {
+  const stmt = db.prepare(`
+    UPDATE refinement_queue
+    SET
+      candidate_prompt = ?,
+      status = 'needs_review',
+      retry_count = retry_count + 1,
+      last_retry_note = ?,
+      last_edit_note = NULL,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
+  stmt.run(candidatePrompt, retryNote ?? null, id);
+}
+
+export function editRefinementSession(
+  id: number,
+  candidatePrompt: string,
+  editNote: string
+): void {
+  const stmt = db.prepare(`
+    UPDATE refinement_queue
+    SET
+      candidate_prompt = ?,
+      status = 'needs_review',
+      last_edit_note = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
+  stmt.run(candidatePrompt, editNote, id);
+}
+
+export function markRefinementAccepted(id: number): void {
+  const stmt = db.prepare(`
+    UPDATE refinement_queue
+    SET status = 'accepted', updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
+  stmt.run(id);
+}
+
+export function getLatestHistoryPromptId(): number | null {
+  const row = db
+    .prepare("SELECT id FROM prompt_history ORDER BY id DESC LIMIT 1")
+    .get() as { id: number } | undefined;
+  return row?.id ?? null;
 }
