@@ -7,6 +7,7 @@ import {
 import { getEmbedding, startEmbeddingWarmup } from "./memory/embeddings";
 import { getContextualExamples } from "./memory/fewShot";
 import { BASE_REFINER_PROMPT } from "./prompts/base";
+import { refineWithLocalModel, startLocalRefinerWarmup } from "./memory/localRefiner";
 import {
   createRefinementSession,
   editRefinementSession,
@@ -200,18 +201,19 @@ async function refineWithSampling(
     return { ok: true, refinedPrompt: extractSampledText(sampled.content) };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    const lower = message.toLowerCase();
-    const isSamplingCapabilityError =
-      lower.includes("does not support sampling") ||
-      lower.includes("sampling/createmessage") ||
-      lower.includes("method not found") ||
-      lower.includes("-32601");
-    return {
-      ok: false,
-      message: isSamplingCapabilityError
-        ? "Unable to refine: connected MCP host does not support sampling/createMessage."
-        : `Unable to refine prompt via sampling: ${message}`,
-    };
+    process.stderr.write(`Sampling failed, attempting local fallback: ${message}\n`);
+
+    const localResult = await refineWithLocalModel(refinementRequest);
+    if (localResult.ok) {
+      return {
+        ok: true,
+        refinedPrompt: localResult.notice
+          ? `${localResult.notice}\n\n${localResult.refinedPrompt}`
+          : localResult.refinedPrompt,
+      };
+    }
+
+    return { ok: false, message: `Unable to refine prompt. ${localResult.message}` };
   }
 }
 
@@ -385,5 +387,6 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 const transport = new StdioServerTransport();
 await server.connect(transport);
 startEmbeddingWarmup();
+startLocalRefinerWarmup();
 
 process.stderr.write("MCP server connected.\n");
