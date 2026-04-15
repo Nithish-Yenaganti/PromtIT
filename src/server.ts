@@ -4,17 +4,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { getEmbedding } from "./memory/embeddings";
+import { getEmbedding, startEmbeddingWarmup } from "./memory/embeddings";
 import { getContextualExamples } from "./memory/fewShot";
 import { BASE_REFINER_PROMPT } from "./prompts/base";
 import { initDB, savePrompt } from "./memory/db";
 import { recordFeedback } from "./tools/recordFeedback";  
 
 initDB();
-
-getEmbedding("warmup").catch((err) => {
-  process.stderr.write(`Warmup alert: ${err.message}\n`);
-});
 
 const server = new McpServer(
   { name: "prompt-engineer", version: "1.0.0" },
@@ -95,5 +91,6 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+startEmbeddingWarmup();
 
 process.stderr.write("Testing MCP")
