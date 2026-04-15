@@ -26,6 +26,36 @@ type FeedbackArgs = {
 const MAX_PROMPT_CHARS = 16000;
 const MAX_USER_EDITS_CHARS = 16000;
 
+function extractSampledText(content: unknown): string {
+  if (Array.isArray(content)) {
+    const firstText = content.find(
+      (block) =>
+        typeof block === "object" &&
+        block !== null &&
+        "type" in block &&
+        (block as { type?: string }).type === "text" &&
+        "text" in block
+    ) as { text?: unknown } | undefined;
+    if (typeof firstText?.text === "string" && firstText.text.trim()) {
+      return firstText.text.trim();
+    }
+    throw new Error("Sampling returned no text content.");
+  }
+
+  if (
+    typeof content === "object" &&
+    content !== null &&
+    "type" in content &&
+    (content as { type?: string }).type === "text" &&
+    "text" in content
+  ) {
+    const text = (content as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) return text.trim();
+  }
+
+  throw new Error("Sampling returned an unsupported content format.");
+}
+
 function parseFeedbackArgs(input: unknown): FeedbackArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const promptIdRaw = args.prompt_id;
@@ -99,17 +129,57 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const currentVector = await getEmbedding(rawPrompt);
 
     const examples = await getContextualExamples(rawPrompt, currentVector);
-    
-    const finalpromt = BASE_REFINER_PROMPT
+
+    const refinementRequest = BASE_REFINER_PROMPT
       .replace("{examples}", examples || "No history found yet.")
       .replace("{input}", rawPrompt);
 
-  // Save prompt + embedding so memory can improve future refinements.
-    const promptId = savePrompt(rawPrompt, finalpromt, currentVector);
+    let refinedPrompt: string;
+    try {
+      const sampled = await server.server.createMessage({
+        systemPrompt:
+          "Act as an expert prompt engineer. Convert messy requests into a clear, execution-ready prompt. Return only the refined prompt text.",
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: refinementRequest,
+            },
+          },
+        ],
+        includeContext: "thisServer",
+        temperature: 0.2,
+        maxTokens: 900,
+      });
+      refinedPrompt = extractSampledText(sampled.content);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      const lower = message.toLowerCase();
+      const isSamplingCapabilityError =
+        lower.includes("does not support sampling") ||
+        lower.includes("sampling/createmessage") ||
+        lower.includes("method not found") ||
+        lower.includes("-32601");
+      return {
+        content: [
+          {
+            type: "text",
+            text: isSamplingCapabilityError
+              ? "Unable to refine: connected MCP host does not support sampling/createMessage."
+              : `Unable to refine prompt via sampling: ${message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Save prompt + embedding so memory can improve future refinements.
+    const promptId = savePrompt(rawPrompt, refinedPrompt, currentVector);
 
 
     return {
-      content: [{ type: "text", text: `[PROMPT_ID: ${promptId}]\n Prompted version of: ${finalpromt}` }],
+      content: [{ type: "text", text: `[PROMPT_ID: ${promptId}]\n${refinedPrompt}` }],
     };
   }
   if (request.params.name === "record_feedback") {
