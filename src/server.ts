@@ -7,7 +7,7 @@ import {
 import { getEmbedding } from "./memory/embeddings";
 import { getContextualExamples } from "./memory/fewShot";
 import { BASE_REFINER_PROMPT } from "./prompts/base";
-import { initDB, saveFeedback, savePrompt } from "./memory/db";
+import { initDB, savePrompt } from "./memory/db";
 
 
 initDB();
@@ -74,31 +74,10 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       content: [{ type: "text", text: `[PROMPT_ID: ${promptId}]\n Prompted version of: ${finalpromt}` }],
     };
   }
-  if (request.params.name === "record_feedback") {
-    const args = request.params.arguments;
-    const promptId = args?.prompt_id;
-    const rating = args?.rating;
-    const userEdits = args?.user_edits;
+  if (request.params.name == "record_feedback"){
 
-    const promptIdNum = typeof promptId === "number" && Number.isInteger(promptId) ? promptId : null;
-    const ratingNum = typeof rating === "number" && Number.isInteger(rating) ? rating : null;
+    
 
-    if (promptIdNum === null || ratingNum === null) {
-      throw new Error("record_feedback requires integer prompt_id and rating.");
-    }
-
-    if (ratingNum < -1 || ratingNum > 1) {
-      throw new Error("record_feedback rating must be -1, 0, or 1.");
-    }
-
-    if (userEdits !== undefined && typeof userEdits !== "string") {
-      throw new Error("record_feedback user_edits must be a string when provided.");
-    }
-
-    const feedbackId = saveFeedback(promptIdNum, ratingNum, userEdits);
-    return {
-      content: [{ type: "text", text: `Feedback recorded (id: ${feedbackId}) for prompt ${promptIdNum}.` }],
-    };
   }
 
   throw new Error("Tool not found");
