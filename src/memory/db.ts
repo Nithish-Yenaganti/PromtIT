@@ -6,6 +6,7 @@ export const db = new Database(DB_PATH, { create: true });
 
 // Setup high-performance mode
 db.run("PRAGMA journal_mode = WAL;");
+db.run("PRAGMA busy_timeout = 5000;"); //wait up to 5s i DB is busy
 
 export function initDB() {
   // table for prompts and their "meaning" (embeddings)
