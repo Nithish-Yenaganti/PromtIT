@@ -133,6 +133,18 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "recall_refinments",
+      description:
+        "Deprecated alias for recall_refinements (kept for backward compatibility with older host configs).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The query to search similar history for." },
+        },
+        required: ["query"],
+      },
+    },
+    {
       name: "record_feedback",
       description:
         "Records quality feedback for a stored refinement to improve memory relevance.",
@@ -178,7 +190,10 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
-  if (request.params.name === "recall_refinements") {
+  if (
+    request.params.name === "recall_refinements" ||
+    request.params.name === "recall_refinments"
+  ) {
     const { query } = parseRecallArgs(request.params.arguments);
     try {
       const queryEmbedding = await getEmbedding(query);
