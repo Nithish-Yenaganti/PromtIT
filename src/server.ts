@@ -25,6 +25,10 @@ type RecallArgs = {
   query: string;
 };
 
+type PromptItArgs = {
+  messyText: string;
+};
+
 type FeedbackArgs = {
   promptId: number;
   rating: -1 | 0 | 1;
@@ -62,6 +66,20 @@ function parseRecallArgs(input: unknown): RecallArgs {
     throw new Error(`query cannot exceed ${MAX_TEXT_CHARS} characters.`);
   }
   return { query };
+}
+
+function parsePromptItArgs(input: unknown): PromptItArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const messyTextRaw = args.messy_text ?? args.prompt;
+
+  if (typeof messyTextRaw !== "string" || !messyTextRaw.trim()) {
+    throw new Error("messy_text must be a non-empty string.");
+  }
+  if (messyTextRaw.length > MAX_TEXT_CHARS) {
+    throw new Error(`messy_text cannot exceed ${MAX_TEXT_CHARS} characters.`);
+  }
+
+  return { messyText: messyTextRaw };
 }
 
 function parseFeedbackArgs(input: unknown): FeedbackArgs {
@@ -103,6 +121,24 @@ function parseFeedbackArgs(input: unknown): FeedbackArgs {
 
 server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
+    {
+      name: "prompt_it",
+      description:
+        "Primary entrypoint: takes messy text, recalls similar refinements, and returns a host-ready conversion payload.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          messy_text: {
+            type: "string",
+            description: "The messy user input to prepare for host-side conversion.",
+          },
+          prompt: {
+            type: "string",
+            description: "Deprecated alias for messy_text.",
+          },
+        },
+      },
+    },
     {
       name: "store_refinement",
       description:
@@ -165,6 +201,50 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (request.params.name === "prompt_it") {
+    const { messyText } = parsePromptItArgs(request.params.arguments);
+
+    let examplesText = "";
+    let recallNotice = "";
+    try {
+      const queryEmbedding = await getEmbedding(messyText);
+      examplesText = await getContextualExamples(messyText, queryEmbedding);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`prompt_it recall path failed: ${message}\n`);
+      const recent = getRecentRefinements(3);
+      examplesText =
+        recent.length > 0
+          ? recent
+              .map((x) => `User: ${x.raw_prompt}\nRefined: ${x.refined_prompt}`)
+              .join("\n\n")
+          : "No relevant refinement history found yet.";
+      recallNotice =
+        "Notice: embedding recall is unavailable, so recent refinements were used instead.\n\n";
+    }
+
+    const examplesBlock = examplesText || "No relevant refinement history found yet.";
+    const conversionInput = [
+      "MESSY_TEXT:",
+      messyText,
+      "",
+      "SIMILAR_REFINEMENTS:",
+      examplesBlock,
+      "",
+      "HOST_TASK:",
+      "Rewrite MESSY_TEXT into a clean, structured system prompt. Return only the refined prompt text.",
+    ].join("\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${recallNotice}${conversionInput}`,
+        },
+      ],
+    };
+  }
+
   if (request.params.name === "store_refinement") {
     const { rawText, refinedText } = parseStoreArgs(request.params.arguments);
     let embedding: number[] | null = null;
