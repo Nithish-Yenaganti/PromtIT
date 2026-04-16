@@ -11,7 +11,12 @@ alwaysApply: true
   1. Call `recall_refinements(query=messy_text)`.
   2. Build conversion input: messy text + recalled examples.
   3. Convert to a clean system prompt using host-side `prompt_engineer` logic.
-  4. Call `store_refinement(raw_text, refined_text)`.
-  5. Execute the coding task using `refined_text` (not raw messy text).
-  6. Optionally call `record_feedback` after completion.
+  4. Show a quick preview block before execution:
+     - Title: `Preview`
+     - Body: the converted prompt
+     - Actions: `Accept | Retry | Edit`
+  5. If user says `Accept`, call `store_refinement(raw_text, refined_text)`.
+  6. Execute the coding task using `refined_text` (not raw messy text).
+  7. Optionally call `record_feedback` after completion.
 - Never skip the refinement pipeline for new tasks.
+- Never execute coding work directly from messy text.
