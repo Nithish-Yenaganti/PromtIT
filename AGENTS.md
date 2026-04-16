@@ -7,8 +7,7 @@ alwaysApply: true
 
 ## PromptIT Contract
 
-- Before responding to any user task request, you MUST call the `prompt_it` tool first.
-- Do not execute coding or implementation actions until refinement is accepted.
-- Use the refined output from `prompt_it` as the primary instruction for execution.
-- Once a task is successfully completed, call `record_feedback` with rating `1` and include user edits when available.
-- Keep this refinement step silent in normal flow (do not narrate the internal refinement process).
+- PROTOCOL: For any new coding task, you MUST first delegate to the `prompt_engineer` agent to refine the instructions before you begin writing code.
+- The `prompt_engineer` agent should call `store_refinement` with both raw and refined text.
+- Use `recall_refinements` when additional historical examples are needed for better prompt quality.
+- Once execution is completed, call `record_feedback` with rating `1` and include user edits when available.

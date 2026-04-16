@@ -8,25 +8,25 @@ This server implements a Retrieval-Augmented Generation (RAG) workflow. When a u
 
 1. Semantic Fingerprinting: The server uses a local embedding model (Transformers.js) to convert the user's text into a numerical vector.
 2. Memory Retrieval: It queries a local SQLite database to find historically similar prompts and their successful refinements based on vector similarity.
-3. Contextual Assembly: It constructs a Meta-Prompt that includes the current request, instructions on prompt engineering best practices, and the most relevant past examples.
+3. Contextual Assembly: It stores and retrieves previously accepted refinements to improve consistency over time.
 4. Learning Loop: By tracking user edits and ratings, the server calculates a Levenshtein distance metric. This allows the system to prioritize examples in the future that required the fewest manual corrections.
 
 ## System Architecture
 
 The project is divided into four functional layers:
 
-* Transport Layer: Manages communication with MCP clients (such as Claude Code or Cursor) via Standard Input/Output (stdio).
+* Transport Layer: Manages communication with MCP clients (such as Claude Code or Codex) via Standard Input/Output (stdio).
 * Database Layer: A local SQLite instance that stores raw prompts, refined outputs, and vector embeddings for long-term persistence.
 * Inference Layer: Runs a local instance of the all-MiniLM-L6-v2 model to perform on-device feature extraction without external API calls.
-* Logic Layer: Handles the orchestration of similarity math, feedback recording, and the assembly of the final refined instruction.
+* Logic Layer: Handles storage, recall, and feedback recording workflows.
 
 ## Why MCP?
 
 By utilizing the Model Context Protocol instead of a standard text-based instruction set, this tool gains capabilities impossible for static files:
 
 * Stateful Memory: It maintains a history that persists across different chat sessions and different AI agents.
-* Computational Logic: It can perform complex string math and database queries that are outside the scope of standard LLM context windows.
-* Privacy: All data processing, including vectorization and storage, occurs on the local machine. No prompt history is sent to a third-party database for the purpose of refinement matching.
+* Computational Logic: It can perform embedding and similarity search outside normal context windows.
+* Privacy: All data processing, including vectorization and storage, occurs on the local machine.
 
 ## Quick Start
 
@@ -35,20 +35,41 @@ bun install
 bun run ./src/server.ts
 ```
 
-## Fallback Behavior (Sampling -> Local Llama)
+## Codex Extension Setup (Bridge Mode)
 
-PromptIT tries MCP `sampling/createMessage` first. If the host does not support sampling, it falls back to a local model using Transformers.js:
+Open your global Codex config file:
 
-- Default local model: `onnx-community/Llama-3.2-1B-Instruct`
-- Default local model: `onnx-community/Llama-3.2-1B-Instruct-ONNX`
-- On first fallback, model files may download to local cache and take time.
+- macOS/Linux: `~/.codex/config.toml`
+- Windows: `%USERPROFILE%\.codex\config.toml`
 
-Optional overrides:
+Add a server + agent bridge:
 
-```bash
-PROMPTIT_LOCAL_REFINER_MODEL=onnx-community/Llama-3.2-1B-Instruct-ONNX
-# Alternative quantized variant:
-# PROMPTIT_LOCAL_REFINER_MODEL=onnx-community/Llama-3.2-1B-Instruct-q4f16
-PROMPTIT_LOCAL_MODELS_ONLY=0
-PROMPTIT_LOCAL_REFINER_MAX_TOKENS=900
+```toml
+[mcp_servers.prompt_refiner]
+command = "bun"
+args = ["run", "/YOUR/ABSOLUTE/PATH/dist/server.js"]
+cwd = "/YOUR/ABSOLUTE/PATH"
+
+[agents.prompt_engineer]
+description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
+mcp_servers = ["prompt_refiner"]
+developer_instructions = """
+You are a Master Prompt Engineer. When the user provides a vague request:
+1. Identify the professional persona required.
+2. Rewrite the request into a structured expert prompt.
+3. Call prompt_refiner.store_refinement to save it locally.
+4. Return ONLY the final structured prompt.
+"""
 ```
+
+Restart the extension after saving `config.toml`.
+
+## Server Role (Storage + Recall)
+
+This server is designed as a librarian/orchestrator backend:
+
+- `store_refinement`: save `raw_text` + `refined_text` + embedding
+- `recall_refinements`: retrieve similar historical refinements
+- `record_feedback`: store user quality signal and edit distance
+
+Refinement generation should be handled by the host/agent (`prompt_engineer`), not by this MCP server.
