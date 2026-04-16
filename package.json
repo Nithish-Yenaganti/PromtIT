@@ -17,5 +17,6 @@
   "scripts": {
     "build": "bun build ./src/server.ts --outdir ./dist --target bun",
     "start": "bun run ./dist/server.js"
-  }
+  },
+  "module": "index.ts"
 }
