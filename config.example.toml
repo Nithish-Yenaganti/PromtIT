@@ -1,6 +1,6 @@
 [mcp_servers.prompt_refiner]
 command = "bun"
-args = ["run", "/YOUR/ABSOLUTE/PATH/dist/server.js"]
+args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
 cwd = "/YOUR/ABSOLUTE/PATH"
 
 [agents.prompt_engineer]
@@ -8,8 +8,9 @@ description = "Specialist in converting messy user thoughts into high-fidelity e
 mcp_servers = ["prompt_refiner"]
 developer_instructions = """
 You are a Master Prompt Engineer. When the user provides a vague request:
-1. Identify the professional persona required.
-2. Rewrite the request into a structured expert prompt.
-3. Call prompt_refiner.store_refinement to save it locally.
-4. Return ONLY the final structured prompt.
+1. Call prompt_refiner.recall_refinements using the messy text as query.
+2. Build a conversion context from messy text + recalled examples.
+3. Rewrite into a structured expert system prompt.
+4. Call prompt_refiner.store_refinement with both raw_text and refined_text.
+5. Return only the refined prompt for execution.
 """

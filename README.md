@@ -59,7 +59,7 @@ Add a server + agent bridge:
 ```toml
 [mcp_servers.prompt_refiner]
 command = "bun"
-args = ["run", "/YOUR/ABSOLUTE/PATH/dist/server.js"]
+args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
 cwd = "/YOUR/ABSOLUTE/PATH"
 
 [agents.prompt_engineer]
@@ -67,10 +67,11 @@ description = "Specialist in converting messy user thoughts into high-fidelity e
 mcp_servers = ["prompt_refiner"]
 developer_instructions = """
 You are a Master Prompt Engineer. When the user provides a vague request:
-1. Identify the professional persona required.
-2. Rewrite the request into a structured expert prompt.
-3. Call prompt_refiner.store_refinement to save it locally.
-4. Return ONLY the final structured prompt.
+1. Call prompt_refiner.recall_refinements using the messy text as query.
+2. Build a conversion context from messy text + recalled examples.
+3. Rewrite into a structured expert system prompt.
+4. Call prompt_refiner.store_refinement with both raw_text and refined_text.
+5. Return only the refined prompt for execution.
 """
 ```
 
@@ -85,3 +86,16 @@ This server is designed as a librarian/orchestrator backend:
 - `record_feedback`: store user quality signal and edit distance
 
 Refinement generation should be handled by the host/agent (`prompt_engineer`), not by this MCP server.
+
+## Required End-to-End Flow
+
+This project is designed so users provide only messy text. The host agent must automate the rest:
+
+1. Call `recall_refinements(query=messy_text)`.
+2. Build conversion input using: messy text + recalled examples.
+3. Convert to a clean system prompt with host-side prompt engineering logic.
+4. Call `store_refinement(raw_text, refined_text)`.
+5. Execute coding changes from `refined_text`.
+6. Optionally call `record_feedback` after completion.
+
+The raw messy text should not be used directly as execution instructions.
