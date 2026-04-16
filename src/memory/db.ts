@@ -87,17 +87,28 @@ function ensureRefinementQueueSchema() {
 /**
  * Helper to save a prompt with its embedding
  */
-export function savePrompt(raw: string, refined: string, embedding: number[]):number {
+export function savePrompt(raw: string, refined: string, embedding?: number[] | null): number {
   const stmt = db.prepare(`
     INSERT INTO prompt_history (raw_prompt, refined_prompt, embedding)
     VALUES (?, ?, ?)
   `);
   
-  // Convert the array of numbers to a Buffer for storage
-  const buffer = Buffer.from(new Float32Array(embedding).buffer);
+  const buffer =
+    Array.isArray(embedding) && embedding.length > 0
+      ? Buffer.from(new Float32Array(embedding).buffer)
+      : null;
   const result = stmt.run(raw, refined, buffer);
 
   return result.lastInsertRowid as number;
+}
+
+export function getRecentRefinements(limit = 3): Array<{ raw_prompt: string; refined_prompt: string }> {
+  const safeLimit = Math.max(1, Math.min(limit, 20));
+  return db
+    .prepare(
+      "SELECT raw_prompt, refined_prompt FROM prompt_history ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(safeLimit) as Array<{ raw_prompt: string; refined_prompt: string }>;
 }
 
 export type RefinementSession = {
