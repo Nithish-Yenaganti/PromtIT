@@ -1,0 +1,15 @@
+[mcp_servers.prompt_refiner]
+command = "bun"
+args = ["run", "/Users/sunny/Downloads/prompt-normalizer/dist/server.js"]
+cwd = "/Users/sunny/Downloads/prompt-normalizer"
+
+[agents.prompt_engineer]
+description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
+mcp_servers = ["prompt_refiner"]
+developer_instructions = """
+You are a Master Prompt Engineer. When the user provides a vague request:
+1. Identify the professional persona required.
+2. Rewrite the request into a structured expert prompt.
+3. Call prompt_refiner.store_refinement to save it locally.
+4. Return ONLY the final structured prompt.
+"""
