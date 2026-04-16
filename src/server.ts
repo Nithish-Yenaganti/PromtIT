@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { getEmbedding, startEmbeddingWarmup } from "./memory/embeddings";
 import { getContextualExamples } from "./memory/fewShot";
-import { initDB, savePrompt } from "./memory/db";
+import { getRecentRefinements, initDB, savePrompt } from "./memory/db";
 import { recordFeedback } from "./tools/recordFeedback";
 
 initDB();
@@ -155,14 +155,24 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "store_refinement") {
     const { rawText, refinedText } = parseStoreArgs(request.params.arguments);
-    const embedding = await getEmbedding(rawText);
+    let embedding: number[] | null = null;
+    let notice = "";
+    try {
+      embedding = await getEmbedding(rawText);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Embedding failed during store_refinement: ${message}\n`);
+      notice =
+        "\nNote: Saved without embedding due to runtime issue. Semantic recall may be limited until embeddings recover.";
+    }
+
     const promptId = savePrompt(rawText, refinedText, embedding);
 
     return {
       content: [
         {
           type: "text",
-          text: `Stored refinement successfully.\nPROMPT_ID: ${promptId}`,
+          text: `Stored refinement successfully.\nPROMPT_ID: ${promptId}${notice}`,
         },
       ],
     };
@@ -170,17 +180,35 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   if (request.params.name === "recall_refinements") {
     const { query } = parseRecallArgs(request.params.arguments);
-    const queryEmbedding = await getEmbedding(query);
-    const examples = await getContextualExamples(query, queryEmbedding);
+    try {
+      const queryEmbedding = await getEmbedding(query);
+      const examples = await getContextualExamples(query, queryEmbedding);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: examples || "No relevant refinement history found yet.",
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text",
+            text: examples || "No relevant refinement history found yet.",
+          },
+        ],
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Embedding failed during recall_refinements: ${message}\n`);
+      const recent = getRecentRefinements(3);
+      const fallback =
+        recent.length > 0
+          ? [
+              "Embedding runtime is currently unavailable; showing recent refinements instead.",
+              "",
+              ...recent.map((x) => `User: ${x.raw_prompt}\nRefined: ${x.refined_prompt}`),
+            ].join("\n\n")
+          : "Embedding runtime is currently unavailable and no refinement history exists yet.";
+
+      return {
+        content: [{ type: "text", text: fallback }],
+      };
+    }
   }
 
   if (request.params.name === "record_feedback") {

@@ -1,5 +1,16 @@
 import { pipeline } from "@xenova/transformers";
 
+// Runtime defaults for more stable local inference on Bun/CPU environments.
+if (!process.env.TRANSFORMERS_BACKEND) {
+  process.env.TRANSFORMERS_BACKEND = "wasm";
+}
+if (!process.env.OMP_NUM_THREADS) {
+  process.env.OMP_NUM_THREADS = "1";
+}
+if (!process.env.ORT_NUM_THREADS) {
+  process.env.ORT_NUM_THREADS = "1";
+}
+
 let extractor: any = null;
 let extractorInitPromise: Promise<any> | null = null;
 const EMBEDDING_MODEL = process.env.PROMPTIT_EMBEDDING_MODEL?.trim() || "Xenova/all-MiniLM-L6-v2";

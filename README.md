@@ -35,6 +35,18 @@ bun install
 bun run ./src/server.ts
 ```
 
+## Stability Notes (Embedding Runtime)
+
+PromptIT embeddings run locally via Transformers.js. For more stable local runtime behavior, use:
+
+```bash
+TRANSFORMERS_BACKEND=wasm
+OMP_NUM_THREADS=1
+ORT_NUM_THREADS=1
+```
+
+These are also defaulted automatically by `src/memory/embeddings.ts` when not set.
+
 ## Codex Extension Setup (Bridge Mode)
 
 Open your global Codex config file:
