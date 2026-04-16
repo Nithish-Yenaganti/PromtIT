@@ -15,7 +15,7 @@
     "sharp": "^0.34.5"
   },
   "scripts": {
-    "build": "bun build ./src/server.ts --outdir ./dist --target bun",
+    "build": "bun build ./src/server.ts --outdir ./dist --target bun --packages external",
     "start": "bun run ./src/server.ts",
     "start:dist": "bun run ./dist/server.js"
   },
