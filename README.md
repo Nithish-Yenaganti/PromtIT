@@ -70,12 +70,20 @@ You are a Master Prompt Engineer. When the user provides a vague request:
 1. Call prompt_refiner.recall_refinements using the messy text as query.
 2. Build a conversion context from messy text + recalled examples.
 3. Rewrite into a structured expert system prompt.
-4. Call prompt_refiner.store_refinement with both raw_text and refined_text.
-5. Return only the refined prompt for execution.
+4. Show a quick preview in this exact shape:
+   Preview
+   <converted prompt body>
+   Actions: Accept | Retry | Edit
+5. If user says Accept, call prompt_refiner.store_refinement with both raw_text and refined_text.
+6. Then execute using the refined prompt.
+7. If user says Retry, regenerate and show preview again.
+8. If user says Edit, accept user edits, rebuild preview, then continue.
 """
 ```
 
 Restart the extension after saving `config.toml`.
+
+Important: use `src/server.ts` for MCP launch (not `dist/server.js`). The bundled dist runtime can fail native ONNX module resolution in Bun on some machines.
 
 ## Server Role (Storage + Recall)
 
@@ -94,8 +102,9 @@ This project is designed so users provide only messy text. The host agent must a
 1. Call `recall_refinements(query=messy_text)`.
 2. Build conversion input using: messy text + recalled examples.
 3. Convert to a clean system prompt with host-side prompt engineering logic.
-4. Call `store_refinement(raw_text, refined_text)`.
-5. Execute coding changes from `refined_text`.
-6. Optionally call `record_feedback` after completion.
+4. Show preview: converted prompt + `Actions: Accept | Retry | Edit`.
+5. On `Accept`, call `store_refinement(raw_text, refined_text)`.
+6. Execute coding changes from `refined_text`.
+7. Optionally call `record_feedback` after completion.
 
 The raw messy text should not be used directly as execution instructions.
