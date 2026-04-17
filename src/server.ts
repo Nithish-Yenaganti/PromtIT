@@ -12,7 +12,7 @@ import { recordFeedback } from "./tools/recordFeedback";
 initDB();
 
 const server = new McpServer(
-  { name: "prompt-refiner", version: "2.0.0" },
+  { name: "prompt-refiner", version: "3.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -169,18 +169,6 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "recall_refinments",
-      description:
-        "Deprecated alias for recall_refinements (kept for backward compatibility with older host configs).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "The query to search similar history for." },
-        },
-        required: ["query"],
-      },
-    },
-    {
       name: "record_feedback",
       description:
         "Records quality feedback for a stored refinement to improve memory relevance.",
@@ -271,8 +259,7 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (
-    request.params.name === "recall_refinements" ||
-    request.params.name === "recall_refinments"
+    request.params.name === "recall_refinements"
   ) {
     const { query } = parseRecallArgs(request.params.arguments);
     try {
