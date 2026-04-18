@@ -21,10 +21,6 @@ type StoreArgs = {
   refinedText: string;
 };
 
-type RecallArgs = {
-  query: string;
-};
-
 type PromptItArgs = {
   messyText: string;
 };
@@ -56,21 +52,9 @@ function parseStoreArgs(input: unknown): StoreArgs {
   return { rawText, refinedText };
 }
 
-function parseRecallArgs(input: unknown): RecallArgs {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const query = args.query;
-  if (typeof query !== "string" || !query.trim()) {
-    throw new Error("query must be a non-empty string.");
-  }
-  if (query.length > MAX_TEXT_CHARS) {
-    throw new Error(`query cannot exceed ${MAX_TEXT_CHARS} characters.`);
-  }
-  return { query };
-}
-
 function parsePromptItArgs(input: unknown): PromptItArgs {
   const args = (input ?? {}) as Record<string, unknown>;
-  const messyTextRaw = args.messy_text ?? args.prompt;
+  const messyTextRaw = args.messy_text;
 
   if (typeof messyTextRaw !== "string" || !messyTextRaw.trim()) {
     throw new Error("messy_text must be a non-empty string.");
@@ -132,11 +116,8 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "The messy user input to prepare for host-side conversion.",
           },
-          prompt: {
-            type: "string",
-            description: "Deprecated alias for messy_text.",
-          },
         },
+        required: ["messy_text"],
       },
     },
     {
@@ -154,18 +135,6 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ["raw_text", "refined_text"],
-      },
-    },
-    {
-      name: "recall_refinements",
-      description:
-        "Returns similar previously accepted refinements for a query to support prompt engineering context.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "The query to search similar history for." },
-        },
-        required: ["query"],
       },
     },
     {
@@ -256,41 +225,6 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
         },
       ],
     };
-  }
-
-  if (
-    request.params.name === "recall_refinements"
-  ) {
-    const { query } = parseRecallArgs(request.params.arguments);
-    try {
-      const queryEmbedding = await getEmbedding(query);
-      const examples = await getContextualExamples(query, queryEmbedding);
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: examples || "No relevant refinement history found yet.",
-          },
-        ],
-      };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Embedding failed during recall_refinements: ${message}\n`);
-      const recent = getRecentRefinements(3);
-      const fallback =
-        recent.length > 0
-          ? [
-              "Embedding runtime is currently unavailable; showing recent refinements instead.",
-              "",
-              ...recent.map((x) => `User: ${x.raw_prompt}\nRefined: ${x.refined_prompt}`),
-            ].join("\n\n")
-          : "Embedding runtime is currently unavailable and no refinement history exists yet.";
-
-      return {
-        content: [{ type: "text", text: fallback }],
-      };
-    }
   }
 
   if (request.params.name === "record_feedback") {

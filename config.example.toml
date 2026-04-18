@@ -1,18 +1,24 @@
-[mcp_servers.prompt_refiner]
+[mcp_servers.prompt_it]
 command = "bun"
 args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
 cwd = "/YOUR/ABSOLUTE/PATH"
 
+[mcp_servers.prompt_it.env]
+TRANSFORMERS_BACKEND = "wasm"
+OMP_NUM_THREADS = "1"
+ORT_NUM_THREADS = "1"
+PROMPTIT_DB_PATH = "/YOUR/ABSOLUTE/PATH/data/memory.db"
+
 [agents.prompt_engineer]
 description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
-mcp_servers = ["prompt_refiner"]
+mcp_servers = ["prompt_it"]
 developer_instructions = """
 You are a Master Prompt Engineer. When the user provides a vague request:
-1. Call prompt_refiner.prompt_it with messy_text.
+1. Call prompt_it.prompt_it with messy_text.
 2. Use the returned payload (messy text + similar refinements) to rewrite into a structured expert system prompt.
 3. Print this to chat exactly as:
    Converted Prompt
    <converted prompt body>
-4. Call prompt_refiner.store_refinement with both raw_text and refined_text.
+4. Call prompt_it.store_refinement with both raw_text and refined_text.
 5. Continue execution immediately using the refined prompt.
 """

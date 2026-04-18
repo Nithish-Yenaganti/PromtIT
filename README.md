@@ -57,22 +57,22 @@ Open your global Codex config file:
 Add a server + agent bridge:
 
 ```toml
-[mcp_servers.prompt_refiner]
+[mcp_servers.prompt_it]
 command = "bun"
 args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
 cwd = "/YOUR/ABSOLUTE/PATH"
 
 [agents.prompt_engineer]
 description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
-mcp_servers = ["prompt_refiner"]
+mcp_servers = ["prompt_it"]
 developer_instructions = """
 You are a Master Prompt Engineer. When the user provides a vague request:
-1. Call prompt_refiner.prompt_it with messy_text.
+1. Call prompt_it.prompt_it with messy_text.
 2. Use the returned payload (messy text + similar refinements) to rewrite into a structured expert system prompt.
 3. Print this to chat exactly as:
    Converted Prompt
    <converted prompt body>
-4. Call prompt_refiner.store_refinement with both raw_text and refined_text.
+4. Call prompt_it.store_refinement with both raw_text and refined_text.
 5. Continue execution immediately using the refined prompt.
 """
 ```
@@ -81,12 +81,12 @@ Restart the extension after saving `config.toml`.
 
 Important: use `src/server.ts` for MCP launch (not `dist/server.js`). The bundled dist runtime can fail native ONNX module resolution in Bun on some machines.
 
-## Server Role (Storage + Recall)
+## Server Role (Storage + Recall Assembly)
 
 This server is designed as a librarian/orchestrator backend:
 
 - `store_refinement`: save `raw_text` + `refined_text` + embedding
-- `recall_refinements`: retrieve similar historical refinements
+- `prompt_it`: assemble `messy_text + similar refinements + host task`
 - `record_feedback`: store user quality signal and edit distance
 
 Refinement generation should be handled by the host/agent (`prompt_engineer`), not by this MCP server.
