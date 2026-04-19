@@ -3,11 +3,66 @@ import path from "path";
 import { mkdirSync } from "fs";
 import os from "os";
 
-const defaultDbDir = path.join(os.homedir(), ".promptit");
 const configuredPath = process.env.PROMPTIT_DB_PATH?.trim();
-const DB_PATH = configuredPath || path.join(defaultDbDir, "memory.db");
-mkdirSync(path.dirname(DB_PATH), { recursive: true });
-export const db = new Database(DB_PATH, { create: true });
+const projectPath = path.join(process.cwd(), "data", "memory.db");
+const tempPath = path.join(os.tmpdir(), "promptit", "memory.db");
+const homePath = path.join(os.homedir(), ".promptit", "memory.db");
+
+function uniquePaths(paths: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const p of paths) {
+    if (!p) continue;
+    const resolved = path.resolve(p);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    ordered.push(resolved);
+  }
+  return ordered;
+}
+
+function openWritableDatabase(dbPath: string): Database {
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const candidate = new Database(dbPath, { create: true });
+  try {
+    // Validate writability early so startup never proceeds with a readonly DB.
+    candidate.run("CREATE TABLE IF NOT EXISTS __promptit_healthcheck (id INTEGER PRIMARY KEY, ts TEXT)");
+    candidate.run("INSERT INTO __promptit_healthcheck (ts) VALUES (CURRENT_TIMESTAMP)");
+    candidate.run("DELETE FROM __promptit_healthcheck");
+    return candidate;
+  } catch (error) {
+    try {
+      candidate.close();
+    } catch {
+      // no-op: close best effort
+    }
+    throw error;
+  }
+}
+
+function selectDatabase(): { db: Database; dbPath: string } {
+  const candidates = uniquePaths([configuredPath, projectPath, tempPath, homePath]);
+  const errors: string[] = [];
+
+  for (const dbPath of candidates) {
+    try {
+      const selected = openWritableDatabase(dbPath);
+      process.stderr.write(`Using PromptIT DB: ${dbPath}\n`);
+      return { db: selected, dbPath };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${dbPath}: ${message}`);
+    }
+  }
+
+  throw new Error(
+    `Unable to open a writable PromptIT database. Tried:\n${errors.join("\n")}`
+  );
+}
+
+const selected = selectDatabase();
+export const DB_PATH = selected.dbPath;
+export const db = selected.db;
 
 // Setup high-performance mode
 db.run("PRAGMA journal_mode = WAL;");

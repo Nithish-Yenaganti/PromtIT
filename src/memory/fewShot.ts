@@ -2,24 +2,42 @@ import { db } from "./db.js";
 import { getEmbedding } from "./embeddings.js";
 
 type PromptHistoryRow = {
+  id: number;
   raw_prompt: string;
   refined_prompt: string;
   embedding: Uint8Array | null;
+  avg_score: number;
 };
 
 type SimilarExample = {
+  id: number;
   raw_prompt: string;
   refined_prompt: string;
+  avg_score: number;
   similarity: number;
+  blended_rank: number;
 };
 
 export async function getContextualExamples(currentPrompt: string, providedVector?: number[]) {
   const currentVector = providedVector ?? await getEmbedding(currentPrompt);
   
+  const similarityWeight = 0.8;
+  const feedbackWeight = 0.2;
+
   // We pull the last 50 prompts to compare
   const history = db
     .prepare(
-      "SELECT raw_prompt, refined_prompt, embedding FROM prompt_history ORDER BY created_at DESC LIMIT 50"
+      `SELECT
+         p.id,
+         p.raw_prompt,
+         p.refined_prompt,
+         p.embedding,
+         COALESCE(AVG(f.score), 0.5) AS avg_score
+       FROM prompt_history p
+       LEFT JOIN feedback f ON f.prompt_id = p.id
+       GROUP BY p.id, p.raw_prompt, p.refined_prompt, p.embedding, p.created_at
+       ORDER BY p.created_at DESC
+       LIMIT 50`
     )
     .all() as PromptHistoryRow[];
 
@@ -39,14 +57,18 @@ export async function getContextualExamples(currentPrompt: string, providedVecto
 
       if (rowVector.length !== currentVector.length) return null;
       const similarity = dotProduct(currentVector, rowVector);
-      return { ...row, similarity };
+      const blended_rank = similarity * similarityWeight + row.avg_score * feedbackWeight;
+      return { ...row, similarity, blended_rank };
     })
     .filter((ex): ex is SimilarExample => ex != null)
-    .sort((a, b) => b.similarity - a.similarity)
+    .sort((a, b) => b.blended_rank - a.blended_rank)
     .slice(0, 3); // Get the top 3 most relevant examples
 
   return examples
-    .map((ex) => `User: ${ex.raw_prompt}\nRefined: ${ex.refined_prompt}`)
+    .map(
+      (ex) =>
+        `User: ${ex.raw_prompt}\nRefined: ${ex.refined_prompt}\nFeedbackScore: ${ex.avg_score.toFixed(2)}`
+    )
     .join("\n\n");
 }
 
