@@ -8,6 +8,7 @@ alwaysApply: true
 ## PromptIT Contract
 
 - Refinement policy source of truth: use `PROMPTENGINEER.md` whenever `prompt_engineer` is invoked. Do not invent alternate rewrite rules outside that file.
+- Transparency rule: before execution, print a short `PromptIT Pipeline (Live)` status block and update progress after each major step (received input, retrieved memory, built payload, generated refined prompt, stored refinement, execution, feedback recorded). Keep updates concise and never expose secrets/tokens/full local absolute paths.
 - PROTOCOL: User should provide only messy text. For any new task, you MUST run this pipeline before making any changes or perform tasks:
   1. Call `prompt_it(messy_text=raw_user_text)` to fetch recall context payload.
   2. Convert that payload into a clean system prompt using host-side `prompt_engineer` logic defined in `PROMPTENGINEER.md`.

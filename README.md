@@ -49,6 +49,14 @@ These are also defaulted automatically by `src/memory/embeddings.ts` when not se
 
 ## Codex Extension Setup (Bridge Mode)
 
+Quick auto-setup (recommended):
+
+```bash
+bash scripts/setup-codex-config.sh
+```
+
+This fills your absolute project path into `~/.codex/config.toml` automatically and backs up any existing config first.
+
 Open your global Codex config file:
 
 - macOS/Linux: `~/.codex/config.toml`
@@ -87,7 +95,7 @@ This server is designed as a librarian/orchestrator backend:
 
 - `store_refinement`: save `raw_text` + `refined_text` + embedding
 - `prompt_it`: assemble `messy_text + similar refinements + host task`
-- `record_feedback`: store user quality signal and edit distance
+- `record_feedback`: store user quality signal (`score`, `source`, `metadata`)
 
 Refinement generation should be handled by the host/agent (`prompt_engineer`), not by this MCP server.
 
