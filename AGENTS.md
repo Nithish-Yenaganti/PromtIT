@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## PromptIT Contract
 
-- Refinement policy source of truth: use [PROMPTENGINEER.md](/Users/sunny/Downloads/prompt-normalizer/PROMPTENGINEER.md) whenever `prompt_engineer` is invoked. Do not invent alternate rewrite rules outside that file.
+- Refinement policy source of truth: use `PROMPTENGINEER.md` whenever `prompt_engineer` is invoked. Do not invent alternate rewrite rules outside that file.
 - PROTOCOL: User should provide only messy text. For any new task, you MUST run this pipeline before making any changes or perform tasks:
   1. Call `prompt_it(messy_text=raw_user_text)` to fetch recall context payload.
   2. Convert that payload into a clean system prompt using host-side `prompt_engineer` logic defined in `PROMPTENGINEER.md`.
