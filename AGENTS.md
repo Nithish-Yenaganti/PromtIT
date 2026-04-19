@@ -14,8 +14,9 @@ alwaysApply: true
   2. Convert that payload into a clean system prompt using host-side `prompt_engineer` logic defined in `PROMPTENGINEER.md`.
   3. Print the converted prompt in chat with title `Converted Prompt`.
   4. Call `store_refinement(raw_text, refined_text)`.
-  5. Execute the coding task immediately using `refined_text` (not raw messy text).
-  6. Always auto-record feedback with `record_feedback`:
+  5. Print the returned token/cost comparison block so the user sees raw-vs-refined impact every time.
+  6. Execute the coding task immediately using `refined_text` (not raw messy text).
+  7. Always auto-record feedback with `record_feedback`:
      - LSP/build/test error: `score=0`, `source="LSP"`, include error details in `metadata`.
      - Agent self-correction/deviation from refined prompt: `score=0.5`, `source="Agent"`, include missing piece/deviation in `metadata`.
      - One-shot success without corrections: `score=1`, `source="Agent"`, set `metadata` to completion summary.

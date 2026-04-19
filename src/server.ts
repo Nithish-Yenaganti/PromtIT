@@ -33,6 +33,62 @@ type FeedbackArgs = {
 };
 
 const MAX_TEXT_CHARS = 16000;
+const DEFAULT_CHARS_PER_TOKEN = 4;
+
+function parsePositiveNumberEnv(name: string): number | null {
+  const raw = process.env[name];
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+function estimateTokens(text: string): number {
+  const normalizedLength = text.trim().length;
+  if (normalizedLength <= 0) return 0;
+  return Math.ceil(normalizedLength / DEFAULT_CHARS_PER_TOKEN);
+}
+
+function formatUsd(amount: number): string {
+  return `$${amount.toFixed(6)}`;
+}
+
+function buildTokenDiffReport(rawText: string, refinedText: string): string {
+  const rawTokens = estimateTokens(rawText);
+  const refinedTokens = estimateTokens(refinedText);
+  const savedTokens = rawTokens - refinedTokens;
+  const reductionPercent = rawTokens > 0 ? (savedTokens / rawTokens) * 100 : 0;
+
+  const reportLines = [
+    "Token Usage (Estimated):",
+    `- Raw messy text: ${rawTokens} tokens`,
+    `- Refined prompt: ${refinedTokens} tokens`,
+    `- Difference: ${savedTokens >= 0 ? "-" : "+"}${Math.abs(savedTokens)} tokens`,
+    `- Reduction: ${reductionPercent.toFixed(2)}%`,
+  ];
+
+  const inputCostPer1k = parsePositiveNumberEnv("PROMPTIT_INPUT_COST_PER_1K");
+  if (inputCostPer1k !== null) {
+    const rawCost = (rawTokens / 1000) * inputCostPer1k;
+    const refinedCost = (refinedTokens / 1000) * inputCostPer1k;
+    const savedCost = rawCost - refinedCost;
+    reportLines.push(
+      "",
+      `Cost Impact (using PROMPTIT_INPUT_COST_PER_1K=${inputCostPer1k}):`,
+      `- Raw estimated input cost: ${formatUsd(rawCost)}`,
+      `- Refined estimated input cost: ${formatUsd(refinedCost)}`,
+      `- Estimated savings: ${savedCost >= 0 ? "-" : "+"}${formatUsd(Math.abs(savedCost))}`
+    );
+  } else {
+    reportLines.push(
+      "",
+      "Cost Impact:",
+      "- Set PROMPTIT_INPUT_COST_PER_1K to include dollar estimates automatically."
+    );
+  }
+
+  return reportLines.join("\n");
+}
 
 function parseStoreArgs(input: unknown): StoreArgs {
   const args = (input ?? {}) as Record<string, unknown>;
@@ -228,12 +284,13 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     const promptId = savePrompt(rawText, refinedText, embedding);
+    const tokenDiffReport = buildTokenDiffReport(rawText, refinedText);
 
     return {
       content: [
         {
           type: "text",
-          text: `Stored refinement successfully.\nPROMPT_ID: ${promptId}${notice}`,
+          text: `Stored refinement successfully.\nPROMPT_ID: ${promptId}\n\n${tokenDiffReport}${notice}`,
         },
       ],
     };

@@ -107,7 +107,24 @@ This project is designed so users provide only messy text. The host agent must a
 2. Convert returned payload to a clean system prompt with host-side prompt engineering logic.
 3. Print `Converted Prompt` to chat.
 4. Call `store_refinement(raw_text, refined_text)`.
-5. Execute coding changes from `refined_text`.
-6. Optionally call `record_feedback` after completion.
+5. Print the token/cost comparison returned by `store_refinement` (raw vs refined).
+6. Execute coding changes from `refined_text`.
+7. Optionally call `record_feedback` after completion.
 
 The raw messy text should not be used directly as execution instructions.
+
+## Token/Cost Visibility
+
+`store_refinement` now returns an estimated token comparison on every run:
+
+- raw messy text tokens
+- refined prompt tokens
+- absolute and percentage token delta
+
+Optional cost estimation is enabled by setting:
+
+```bash
+PROMPTIT_INPUT_COST_PER_1K=0.005
+```
+
+When set, the server also prints estimated raw/refined input cost and savings.
