@@ -19,21 +19,88 @@ const server = new McpServer(
 type StoreArgs = {
   rawText: string;
   refinedText: string;
+  taskId: string;
+  executionToken: string;
 };
 
 type PromptItArgs = {
   messyText: string;
+  strict: boolean;
 };
 
 type FeedbackArgs = {
   promptId: number;
   score: number;
   source: "LSP" | "Agent" | "User";
+  taskId: string;
+  executionToken: string;
   metadata?: unknown;
 };
 
 const MAX_TEXT_CHARS = 16000;
 const DEFAULT_CHARS_PER_TOKEN = 4;
+const EXECUTION_TOKEN_TTL_MS = 30 * 60 * 1000;
+
+type RefinementSession = {
+  taskId: string;
+  executionToken: string;
+  createdAtMs: number;
+  expiresAtMs: number;
+  storeDone: boolean;
+  feedbackDone: boolean;
+  promptId?: number;
+};
+
+const refinementSessions = new Map<string, RefinementSession>();
+
+function fail(code: string, message: string): never {
+  throw new Error(`${code}: ${message}`);
+}
+
+function pruneExpiredSessions() {
+  const now = Date.now();
+  for (const [taskId, session] of refinementSessions.entries()) {
+    if (session.expiresAtMs <= now) {
+      refinementSessions.delete(taskId);
+    }
+  }
+}
+
+function createSession(): RefinementSession {
+  pruneExpiredSessions();
+  const now = Date.now();
+  const taskId = crypto.randomUUID();
+  const executionToken = crypto.randomUUID();
+  const session: RefinementSession = {
+    taskId,
+    executionToken,
+    createdAtMs: now,
+    expiresAtMs: now + EXECUTION_TOKEN_TTL_MS,
+    storeDone: false,
+    feedbackDone: false,
+  };
+  refinementSessions.set(taskId, session);
+  return session;
+}
+
+function validateSession(taskIdRaw: string, tokenRaw: string): RefinementSession {
+  pruneExpiredSessions();
+  const session = refinementSessions.get(taskIdRaw);
+  if (!session) {
+    fail(
+      "ERR_PROMPT_IT_REQUIRED",
+      "No active refinement session. Call prompt_it first to get a task_id and execution_token."
+    );
+  }
+  if (session.executionToken !== tokenRaw) {
+    fail("ERR_INVALID_EXECUTION_TOKEN", "execution_token is invalid for this task_id.");
+  }
+  if (session.expiresAtMs <= Date.now()) {
+    refinementSessions.delete(taskIdRaw);
+    fail("ERR_TOKEN_EXPIRED", "execution_token expired. Call prompt_it again.");
+  }
+  return session;
+}
 
 function parsePositiveNumberEnv(name: string): number | null {
   const raw = process.env[name];
@@ -94,6 +161,8 @@ function parseStoreArgs(input: unknown): StoreArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const rawText = args.raw_text;
   const refinedText = args.refined_text;
+  const taskIdRaw = args.task_id;
+  const executionTokenRaw = args.execution_token;
 
   if (typeof rawText !== "string" || !rawText.trim()) {
     throw new Error("raw_text must be a non-empty string.");
@@ -104,13 +173,20 @@ function parseStoreArgs(input: unknown): StoreArgs {
   if (rawText.length > MAX_TEXT_CHARS || refinedText.length > MAX_TEXT_CHARS) {
     throw new Error(`raw_text/refined_text cannot exceed ${MAX_TEXT_CHARS} characters.`);
   }
+  if (typeof taskIdRaw !== "string" || !taskIdRaw.trim()) {
+    throw new Error("task_id must be a non-empty string.");
+  }
+  if (typeof executionTokenRaw !== "string" || !executionTokenRaw.trim()) {
+    throw new Error("execution_token must be a non-empty string.");
+  }
 
-  return { rawText, refinedText };
+  return { rawText, refinedText, taskId: taskIdRaw, executionToken: executionTokenRaw };
 }
 
 function parsePromptItArgs(input: unknown): PromptItArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const messyTextRaw = args.messy_text;
+  const strictRaw = args.strict;
 
   if (typeof messyTextRaw !== "string" || !messyTextRaw.trim()) {
     throw new Error("messy_text must be a non-empty string.");
@@ -119,7 +195,11 @@ function parsePromptItArgs(input: unknown): PromptItArgs {
     throw new Error(`messy_text cannot exceed ${MAX_TEXT_CHARS} characters.`);
   }
 
-  return { messyText: messyTextRaw };
+  if (strictRaw !== undefined && typeof strictRaw !== "boolean") {
+    throw new Error("strict must be a boolean when provided.");
+  }
+
+  return { messyText: messyTextRaw, strict: strictRaw ?? true };
 }
 
 function parseFeedbackArgs(input: unknown): FeedbackArgs {
@@ -127,6 +207,8 @@ function parseFeedbackArgs(input: unknown): FeedbackArgs {
   const promptIdRaw = args.prompt_id;
   const scoreRaw = args.score;
   const sourceRaw = args.source;
+  const taskIdRaw = args.task_id;
+  const executionTokenRaw = args.execution_token;
   const metadataRaw = args.metadata;
 
   if (typeof promptIdRaw !== "string" || !promptIdRaw.trim()) {
@@ -151,11 +233,19 @@ function parseFeedbackArgs(input: unknown): FeedbackArgs {
   ) {
     throw new Error("source must be one of: LSP, Agent, User.");
   }
+  if (typeof taskIdRaw !== "string" || !taskIdRaw.trim()) {
+    throw new Error("task_id must be a non-empty string.");
+  }
+  if (typeof executionTokenRaw !== "string" || !executionTokenRaw.trim()) {
+    throw new Error("execution_token must be a non-empty string.");
+  }
 
   return {
     promptId: parsedPromptId,
     score: scoreRaw,
     source: sourceRaw,
+    taskId: taskIdRaw,
+    executionToken: executionTokenRaw,
     metadata: metadataRaw,
   };
 }
@@ -172,6 +262,11 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
           messy_text: {
             type: "string",
             description: "The messy user input to prepare for host-side conversion.",
+          },
+          strict: {
+            type: "boolean",
+            description:
+              "When true (default), prompt_it returns enforcement metadata (task_id, execution_token, required_steps).",
           },
         },
         required: ["messy_text"],
@@ -190,8 +285,16 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
             description:
               "The structured prompt produced by the host agent and ready for execution.",
           },
+          task_id: {
+            type: "string",
+            description: "Task id returned by prompt_it.",
+          },
+          execution_token: {
+            type: "string",
+            description: "Execution token returned by prompt_it.",
+          },
         },
-        required: ["raw_text", "refined_text"],
+        required: ["raw_text", "refined_text", "task_id", "execution_token"],
       },
     },
     {
@@ -218,8 +321,16 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "object",
             description: "JSON metadata such as error message or missing piece.",
           },
+          task_id: {
+            type: "string",
+            description: "Task id returned by prompt_it.",
+          },
+          execution_token: {
+            type: "string",
+            description: "Execution token returned by prompt_it.",
+          },
         },
-        required: ["prompt_id", "score", "source"],
+        required: ["prompt_id", "score", "source", "task_id", "execution_token"],
       },
     },
   ],
@@ -227,7 +338,7 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "prompt_it") {
-    const { messyText } = parsePromptItArgs(request.params.arguments);
+    const { messyText, strict } = parsePromptItArgs(request.params.arguments);
 
     let examplesText = "";
     let recallNotice = "";
@@ -260,18 +371,36 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       "Rewrite MESSY_TEXT into a clean, structured system prompt. Return only the refined prompt text.",
     ].join("\n");
 
+    const session = createSession();
+    const strictMeta = strict
+      ? [
+          "",
+          "ENFORCEMENT:",
+          `TASK_ID: ${session.taskId}`,
+          `EXECUTION_TOKEN: ${session.executionToken}`,
+          `TOKEN_TTL_SECONDS: ${Math.floor(EXECUTION_TOKEN_TTL_MS / 1000)}`,
+          "REQUIRED_STEPS: store_refinement -> record_feedback",
+        ].join("\n")
+      : "";
+
     return {
       content: [
         {
           type: "text",
-          text: `${recallNotice}${conversionInput}`,
+          text: `${recallNotice}${conversionInput}${strictMeta}`,
         },
       ],
     };
   }
 
   if (request.params.name === "store_refinement") {
-    const { rawText, refinedText } = parseStoreArgs(request.params.arguments);
+    const { rawText, refinedText, taskId, executionToken } = parseStoreArgs(
+      request.params.arguments
+    );
+    const session = validateSession(taskId, executionToken);
+    if (session.storeDone) {
+      fail("ERR_FLOW_INVALID", "store_refinement has already been completed for this task.");
+    }
     let embedding: number[] | null = null;
     let notice = "";
     try {
@@ -285,6 +414,8 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     const promptId = savePrompt(rawText, refinedText, embedding);
     const tokenDiffReport = buildTokenDiffReport(rawText, refinedText);
+    session.storeDone = true;
+    session.promptId = promptId;
 
     return {
       content: [
@@ -298,13 +429,31 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   if (request.params.name === "record_feedback") {
     try {
-      const { promptId, score, source, metadata } = parseFeedbackArgs(
+      const { promptId, score, source, metadata, taskId, executionToken } = parseFeedbackArgs(
         request.params.arguments
       );
+      const session = validateSession(taskId, executionToken);
+      if (!session.storeDone) {
+        fail(
+          "ERR_FLOW_INVALID",
+          "store_refinement must be completed before record_feedback."
+        );
+      }
+      if (session.feedbackDone) {
+        fail("ERR_FLOW_INVALID", "record_feedback has already been completed for this task.");
+      }
+      if (session.promptId && session.promptId !== promptId) {
+        fail(
+          "ERR_FLOW_INVALID",
+          "prompt_id mismatch for this task. Use the prompt_id returned by store_refinement."
+        );
+      }
       recordFeedback(promptId, score, source, metadata);
+      session.feedbackDone = true;
+      refinementSessions.delete(taskId);
       return {
         content: [
-          { type: "text", text: "Feedback recorded. Prompt memory is updated." },
+          { type: "text", text: "Feedback recorded. Prompt memory is updated. Task closed." },
         ],
       };
     } catch (error: unknown) {

@@ -93,9 +93,9 @@ Important: use `src/server.ts` for MCP launch (not `dist/server.js`). The bundle
 
 This server is designed as a librarian/orchestrator backend:
 
-- `store_refinement`: save `raw_text` + `refined_text` + embedding
+- `store_refinement`: save `raw_text` + `refined_text` + embedding (requires task_id + execution_token from prompt_it)
 - `prompt_it`: assemble `messy_text + similar refinements + host task`
-- `record_feedback`: store user quality signal (`score`, `source`, `metadata`)
+- `record_feedback`: store user quality signal (`score`, `source`, `metadata`) (requires task_id + execution_token from prompt_it)
 
 Refinement generation should be handled by the host/agent (`prompt_engineer`), not by this MCP server.
 
@@ -103,15 +103,28 @@ Refinement generation should be handled by the host/agent (`prompt_engineer`), n
 
 This project is designed so users provide only messy text. The host agent must automate the rest:
 
-1. Call `prompt_it(messy_text=raw_user_text)`.
+1. Call `prompt_it(messy_text=raw_user_text)` and capture `TASK_ID` + `EXECUTION_TOKEN`.
 2. Convert returned payload to a clean system prompt with host-side prompt engineering logic.
 3. Print `Converted Prompt` to chat.
-4. Call `store_refinement(raw_text, refined_text)`.
+4. Call `store_refinement(raw_text, refined_text, task_id, execution_token)`.
 5. Print the token/cost comparison returned by `store_refinement` (raw vs refined).
 6. Execute coding changes from `refined_text`.
-7. Optionally call `record_feedback` after completion.
+7. Call `record_feedback(prompt_id, score, source, metadata, task_id, execution_token)` after completion.
 
 The raw messy text should not be used directly as execution instructions.
+
+## MCP Enforcement (v3)
+
+PromptIT now enforces a task token lifecycle at MCP level:
+
+- `prompt_it` issues a per-task `TASK_ID` and `EXECUTION_TOKEN`.
+- `store_refinement` and `record_feedback` hard-fail without valid token/session.
+- `record_feedback` hard-fails if `store_refinement` was not completed first.
+- Error codes include:
+  - `ERR_PROMPT_IT_REQUIRED`
+  - `ERR_INVALID_EXECUTION_TOKEN`
+  - `ERR_TOKEN_EXPIRED`
+  - `ERR_FLOW_INVALID`
 
 ## Token/Cost Visibility
 
