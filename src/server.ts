@@ -27,12 +27,12 @@ type PromptItArgs = {
 
 type FeedbackArgs = {
   promptId: number;
-  rating: -1 | 0 | 1;
-  userEdits?: string;
+  score: number;
+  source: "LSP" | "Agent" | "User";
+  metadata?: unknown;
 };
 
 const MAX_TEXT_CHARS = 16000;
-const MAX_USER_EDITS_CHARS = 16000;
 
 function parseStoreArgs(input: unknown): StoreArgs {
   const args = (input ?? {}) as Record<string, unknown>;
@@ -69,37 +69,38 @@ function parsePromptItArgs(input: unknown): PromptItArgs {
 function parseFeedbackArgs(input: unknown): FeedbackArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const promptIdRaw = args.prompt_id;
-  const ratingRaw = args.rating;
-  const userEditsRaw = args.user_edits;
+  const scoreRaw = args.score;
+  const sourceRaw = args.source;
+  const metadataRaw = args.metadata;
+
+  if (typeof promptIdRaw !== "string" || !promptIdRaw.trim()) {
+    throw new Error("prompt_id must be a non-empty string.");
+  }
+  const parsedPromptId = Number(promptIdRaw);
+  if (!Number.isInteger(parsedPromptId) || parsedPromptId <= 0) {
+    throw new Error("prompt_id must be a string containing a positive integer.");
+  }
+
+  if (typeof scoreRaw !== "number" || !Number.isFinite(scoreRaw)) {
+    throw new Error("score must be a number between 0 and 1.");
+  }
+  if (scoreRaw < 0 || scoreRaw > 1) {
+    throw new Error("score must be between 0 and 1.");
+  }
 
   if (
-    typeof promptIdRaw !== "number" ||
-    !Number.isInteger(promptIdRaw) ||
-    promptIdRaw <= 0
+    sourceRaw !== "LSP" &&
+    sourceRaw !== "Agent" &&
+    sourceRaw !== "User"
   ) {
-    throw new Error("prompt_id must be a positive integer.");
-  }
-  if (
-    typeof ratingRaw !== "number" ||
-    !Number.isInteger(ratingRaw) ||
-    ![-1, 0, 1].includes(ratingRaw)
-  ) {
-    throw new Error("rating must be one of: -1, 0, 1.");
-  }
-  if (userEditsRaw !== undefined && typeof userEditsRaw !== "string") {
-    throw new Error("user_edits must be a string when provided.");
-  }
-  if (
-    typeof userEditsRaw === "string" &&
-    userEditsRaw.length > MAX_USER_EDITS_CHARS
-  ) {
-    throw new Error(`user_edits exceeds ${MAX_USER_EDITS_CHARS} characters.`);
+    throw new Error("source must be one of: LSP, Agent, User.");
   }
 
   return {
-    promptId: promptIdRaw,
-    rating: ratingRaw as -1 | 0 | 1,
-    userEdits: userEditsRaw,
+    promptId: parsedPromptId,
+    score: scoreRaw,
+    source: sourceRaw,
+    metadata: metadataRaw,
   };
 }
 
@@ -144,14 +145,25 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          prompt_id: { type: "integer", description: "The prompt_history row ID." },
-          rating: { type: "integer", description: "1 good, -1 bad, 0 neutral." },
-          user_edits: {
+          prompt_id: {
             type: "string",
-            description: "Optional final prompt text after user edits.",
+            description: "Links back to the original SQLite prompt_history entry (as string id).",
+          },
+          score: {
+            type: "number",
+            description: "Float from 0 to 1 (0=failure, 0.5=needed tweaks, 1=perfect).",
+          },
+          source: {
+            type: "string",
+            enum: ["LSP", "Agent", "User"],
+            description: "Feedback source.",
+          },
+          metadata: {
+            type: "object",
+            description: "JSON metadata such as error message or missing piece.",
           },
         },
-        required: ["prompt_id", "rating"],
+        required: ["prompt_id", "score", "source"],
       },
     },
   ],
@@ -229,8 +241,10 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   if (request.params.name === "record_feedback") {
     try {
-      const { promptId, rating, userEdits } = parseFeedbackArgs(request.params.arguments);
-      recordFeedback(promptId, rating, userEdits);
+      const { promptId, score, source, metadata } = parseFeedbackArgs(
+        request.params.arguments
+      );
+      recordFeedback(promptId, score, source, metadata);
       return {
         content: [
           { type: "text", text: "Feedback recorded. Prompt memory is updated." },
