@@ -9,7 +9,7 @@ This server implements a Retrieval-Augmented Generation (RAG) workflow. When a u
 1. Semantic Fingerprinting: The server uses a local embedding model (Transformers.js) to convert the user's text into a numerical vector.
 2. Memory Retrieval: It queries a local SQLite database to find historically similar prompts and their successful refinements based on vector similarity.
 3. Contextual Assembly: It stores and retrieves previously accepted refinements to improve consistency over time.
-4. Learning Loop: By tracking user edits and ratings, the server calculates a Levenshtein distance metric. This allows the system to prioritize examples in the future that required the fewest manual corrections.
+4. Learning Loop: By tracking structured feedback (`score`, `source`, `metadata`), the server adjusts retrieval ranking so higher-quality past refinements are prioritized.
 
 ## System Architecture
 

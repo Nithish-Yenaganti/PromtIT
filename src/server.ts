@@ -44,7 +44,6 @@ const EXECUTION_TOKEN_TTL_MS = 30 * 60 * 1000;
 type RefinementSession = {
   taskId: string;
   executionToken: string;
-  createdAtMs: number;
   expiresAtMs: number;
   storeDone: boolean;
   feedbackDone: boolean;
@@ -74,7 +73,6 @@ function createSession(): RefinementSession {
   const session: RefinementSession = {
     taskId,
     executionToken,
-    createdAtMs: now,
     expiresAtMs: now + EXECUTION_TOKEN_TTL_MS,
     storeDone: false,
     feedbackDone: false,
@@ -368,7 +366,7 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       examplesBlock,
       "",
       "HOST_TASK:",
-      "Rewrite MESSY_TEXT into a clean, structured system prompt. Return only the refined prompt text.",
+      "Rewrite MESSY_TEXT into a clean, structured system prompt. Return only the refined prompt text. Do not include schema/section headers unless explicitly requested.",
     ].join("\n");
 
     const session = createSession();

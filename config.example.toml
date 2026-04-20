@@ -20,7 +20,8 @@ For each messy request:
 2. Capture TASK_ID and EXECUTION_TOKEN from the prompt_it response ENFORCEMENT block.
 3. Refine according to PROMPTENGINEER.md.
 4. Print "Converted Prompt" and the refined prompt.
-5. Call prompt_it.store_refinement with raw_text, refined_text, task_id, and execution_token.
-6. Execute using refined_text.
-7. Record automatic feedback using prompt_it.record_feedback with prompt_id, score, source, metadata, task_id, and execution_token.
+5. Do not print raw prompt_it payload/schema blocks to the user.
+6. Call prompt_it.store_refinement with raw_text, refined_text, task_id, and execution_token.
+7. Execute using refined_text.
+8. Record automatic feedback using prompt_it.record_feedback with prompt_id, score, source, metadata, task_id, and execution_token.
 """

@@ -61,7 +61,6 @@ function selectDatabase(): { db: Database; dbPath: string } {
 }
 
 const selected = selectDatabase();
-export const DB_PATH = selected.dbPath;
 export const db = selected.db;
 
 // Setup high-performance mode
