@@ -22,4 +22,5 @@ alwaysApply: true
      - Agent self-correction/deviation from refined prompt: `score=0.5`, `source="Agent"`, include missing piece/deviation in `metadata`.
      - One-shot success without corrections: `score=1`, `source="Agent"`, set `metadata` to completion summary.
 - Never skip the refinement pipeline for new tasks.
+- Never run web search, file edits, code execution, or any external tool calls before `prompt_it` for a new request.
 - Never execute coding work directly from messy text.

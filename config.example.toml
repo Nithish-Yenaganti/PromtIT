@@ -16,6 +16,7 @@ developer_instructions = """
 You are the orchestration layer only.
 Follow PROMPTENGINEER.md as the single source of truth for refinement policy.
 For each messy request:
+0. Do not run web search, file edits, code execution, or any other tool before prompt_it for a new request.
 1. Call prompt_it.prompt_it with messy_text.
 2. Capture TASK_ID and EXECUTION_TOKEN from the prompt_it response ENFORCEMENT block.
 3. Refine according to PROMPTENGINEER.md by inferring intent type and user seniority from the messy text.

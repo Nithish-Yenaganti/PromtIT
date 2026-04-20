@@ -420,7 +420,7 @@ promptItServer.server.setRequestHandler(CallToolRequestSchema, async (request) =
       sanitizedExamples.text,
       "",
       "HOST_TASK:",
-      "Rewrite MESSY_TEXT into a clean, structured system prompt. Infer intent type and user seniority from the text, and adapt prompt depth/terminology accordingly. Return only the refined prompt text. Do not include schema/section headers unless explicitly requested.",
+      "Rewrite MESSY_TEXT into a clean, structured system prompt. Infer intent type and user seniority from the text, and adapt prompt depth/terminology accordingly. Return only the refined prompt text. Do not include schema/section headers unless explicitly requested. Do not run web search or any external tools before completing this refinement step.",
     ].join("\n");
 
     const session = createSession();

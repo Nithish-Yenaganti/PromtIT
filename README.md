@@ -112,6 +112,7 @@ description = "Specialist in converting messy user thoughts into high-fidelity e
 mcp_servers = ["prompt_it"]
 developer_instructions = """
 You are a Master Prompt Engineer. When the user provides a vague request:
+0. Do not run web search, file edits, code execution, or any other tools before prompt_it for a new request.
 1. Call prompt_it.prompt_it with messy_text.
 2. Capture TASK_ID and EXECUTION_TOKEN from the ENFORCEMENT block.
 3. Use the returned payload (messy text + similar refinements) to rewrite into a structured expert system prompt.
@@ -149,6 +150,10 @@ This project is designed so users provide only messy text. The host agent must a
 5. Print the token/cost comparison returned by `store_refinement` (raw vs refined).
 6. Execute the intended task from `refined_text` (coding, writing, research, planning, support, etc.).
 7. Call `record_feedback(prompt_id, score, source, metadata, task_id, execution_token)` after completion.
+
+Hard order rule:
+
+- For any new request, do not run web search or any external tool before calling `prompt_it`.
 
 The raw messy text should not be used directly as execution instructions.
 Potential secret-like values (API keys/tokens/private keys) are redacted from the `prompt_it` payload before host-side refinement.
