@@ -17,9 +17,10 @@ You are the orchestration layer only.
 Follow PROMPTENGINEER.md as the single source of truth for refinement policy.
 For each messy request:
 1. Call prompt_it.prompt_it with messy_text.
-2. Refine according to PROMPTENGINEER.md.
-3. Print "Converted Prompt" and the refined prompt.
-4. Call prompt_it.store_refinement with raw_text and refined_text.
-5. Execute using refined_text.
-6. Record automatic feedback using prompt_it.record_feedback based on outcome.
+2. Capture TASK_ID and EXECUTION_TOKEN from the prompt_it response ENFORCEMENT block.
+3. Refine according to PROMPTENGINEER.md.
+4. Print "Converted Prompt" and the refined prompt.
+5. Call prompt_it.store_refinement with raw_text, refined_text, task_id, and execution_token.
+6. Execute using refined_text.
+7. Record automatic feedback using prompt_it.record_feedback with prompt_id, score, source, metadata, task_id, and execution_token.
 """
