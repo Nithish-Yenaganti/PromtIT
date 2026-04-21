@@ -16,10 +16,8 @@
   },
   "scripts": {
     "build": "bun build ./src/server.ts --outdir ./dist --target bun --packages external",
-    "build:bridge": "bun build ./src/bridge.ts --outdir ./dist --target bun --packages external",
     "start": "bun run ./src/server.ts",
-    "start:dist": "bun run ./dist/server.js",
-    "start:bridge": "bun run ./src/bridge.ts"
+    "start:dist": "bun run ./dist/server.js"
   },
   "module": "index.ts"
 }

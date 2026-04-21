@@ -1,6 +1,6 @@
 # PromptIT MCP Server
 
-The PromptIT is a local-first Model Context Protocol (MCP) server designed to act as a specialized bridge between a developer and an AI agent. It transforms unstructured, conversational requests into high-fidelity instructions by leveraging a persistent local memory.
+The PromptIT is a local-first Model Context Protocol (MCP) server designed to refine unstructured user requests into high-fidelity instructions using persistent local memory.
 
 ## Core Logic
 
@@ -35,43 +35,6 @@ bun install
 bun run ./src/server.ts
 ```
 
-## Local Browser Bridge (SSE/HTTP via Bun)
-
-Use this when you want browser-based clients to connect locally without stdio.
-
-Start the local bridge:
-
-```bash
-bun run start:bridge
-```
-
-Bridge endpoints:
-
-- MCP endpoint: `http://127.0.0.1:8787/mcp`
-- Health check: `http://127.0.0.1:8787/health`
-
-Optional bridge env:
-
-```bash
-PROMPTIT_BRIDGE_HOST=127.0.0.1
-PROMPTIT_BRIDGE_PORT=8787
-PROMPTIT_BRIDGE_AUTH_MODE=api_key
-PROMPTIT_BRIDGE_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-PROMPTIT_BRIDGE_API_KEY=change-me
-```
-
-The bridge uses MCP Streamable HTTP (SSE-capable via `GET /mcp`) and serves `POST/DELETE` on the same endpoint.
-
-Security defaults:
-
-- Browser requests are allowed only from loopback origins by default (`localhost` / `127.0.0.1` / `::1`).
-- Add non-loopback origins explicitly via `PROMPTIT_BRIDGE_ALLOWED_ORIGINS`.
-- Auth modes:
-  - `api_key` (default): requires `PROMPTIT_BRIDGE_API_KEY`, accepted via `X-PromptIT-Api-Key` or `Authorization: Bearer ...`.
-  - `oauth_client_credentials`: enables `/oauth/token` and `/.well-known/oauth-authorization-server` and requires bearer tokens.
-  - `none`: local-only convenience mode (blocked on non-loopback host).
-- If you bind bridge host to non-loopback (`0.0.0.0`, external IP), `PROMPTIT_BRIDGE_AUTH_MODE` must not be `none`.
-
 ## Stability Notes (Embedding Runtime)
 
 PromptIT embeddings run locally via Transformers.js. For more stable local runtime behavior, use:
@@ -84,7 +47,7 @@ ORT_NUM_THREADS=1
 
 These are also defaulted automatically by `src/memory/embeddings.ts` when not set.
 
-## Codex Extension Setup (Bridge Mode)
+## Codex Extension Setup (Stdio Mode)
 
 Quick auto-setup (recommended):
 
@@ -99,7 +62,7 @@ Open your global Codex config file:
 - macOS/Linux: `~/.codex/config.toml`
 - Windows: `%USERPROFILE%\.codex\config.toml`
 
-Add a server + agent bridge:
+Add a server + agent:
 
 ```toml
 [mcp_servers.prompt_it]
@@ -153,22 +116,12 @@ This project is designed so users provide only messy text. The host agent must a
 
 Hard order rule:
 
-- For any new request, do not run web search or any external tool before calling `prompt_it`.
+- For medium/large/ambiguous requests, do not run web search or external tools before calling `prompt_it`.
+- Tiny mechanical tasks may use a fast path (single rename, one-line typo fix, quick grep/list/check).
 
 The raw messy text should not be used directly as execution instructions.
 Potential secret-like values (API keys/tokens/private keys) are redacted from the `prompt_it` payload before host-side refinement.
 Potential secret-like values are also redacted before persistence in `store_refinement`, and `record_feedback.metadata` is sanitized/truncated before storage.
-
-OAuth connector setup (Claude custom connector):
-
-```bash
-PROMPTIT_BRIDGE_AUTH_MODE=oauth_client_credentials
-PROMPTIT_OAUTH_CLIENT_ID=promptit-client
-PROMPTIT_OAUTH_CLIENT_SECRET=promptit-secret
-PROMPTIT_OAUTH_TOKEN_TTL_SECONDS=3600
-```
-
-Use the same client ID/secret in Claude connector advanced settings.
 
 ## MCP Enforcement (v3)
 
