@@ -1,18 +1,29 @@
-[mcp_servers.prompt_refiner]
+[mcp_servers.prompt_it]
 command = "bun"
 args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
 cwd = "/YOUR/ABSOLUTE/PATH"
 
+[mcp_servers.prompt_it.env]
+TRANSFORMERS_BACKEND = "wasm"
+OMP_NUM_THREADS = "1"
+ORT_NUM_THREADS = "1"
+PROMPTIT_DB_PATH = "/YOUR/ABSOLUTE/PATH/data/memory.db"
+
 [agents.prompt_engineer]
 description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
-mcp_servers = ["prompt_refiner"]
+mcp_servers = ["prompt_it"]
 developer_instructions = """
-You are a Master Prompt Engineer. When the user provides a vague request:
-1. Call prompt_refiner.prompt_it with messy_text.
-2. Use the returned payload (messy text + similar refinements) to rewrite into a structured expert system prompt.
-3. Print this to chat exactly as:
-   Converted Prompt
-   <converted prompt body>
-4. Call prompt_refiner.store_refinement with both raw_text and refined_text.
-5. Continue execution immediately using the refined prompt.
+You are the orchestration layer only.
+Follow PROMPTENGINEER.md as the single source of truth for refinement policy.
+For each messy request:
+0. For medium/large/ambiguous tasks, do not run web search, file edits, code execution, or any other tool before prompt_it.
+0b. Tiny mechanical tasks may skip prompt_it (single rename, one-line typo fix, quick grep/list/check).
+1. Call prompt_it.prompt_it with messy_text for all non-tiny tasks.
+2. Capture TASK_ID and EXECUTION_TOKEN from the prompt_it response ENFORCEMENT block.
+3. Refine according to PROMPTENGINEER.md by inferring intent type and user seniority from the messy text.
+4. Print "Converted Prompt" and the refined prompt.
+5. Do not print raw prompt_it payload/schema blocks to the user.
+6. Call prompt_it.store_refinement with raw_text, refined_text, task_id, and execution_token.
+7. Execute the intended task using refined_text (not coding-only by default).
+8. Record automatic feedback using prompt_it.record_feedback with prompt_id, score, source, metadata, task_id, and execution_token.
 """
