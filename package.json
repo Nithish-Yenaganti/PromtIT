@@ -17,7 +17,8 @@
   "scripts": {
     "build": "bun build ./src/server.ts --outdir ./dist --target bun --packages external",
     "start": "bun run ./src/server.ts",
-    "start:dist": "bun run ./dist/server.js"
+    "start:dist": "bun run ./dist/server.js",
+    "prompts:chat:engineering": "bun run ./scripts/fetch-prompts-chat-engineering.ts"
   },
   "module": "index.ts"
 }

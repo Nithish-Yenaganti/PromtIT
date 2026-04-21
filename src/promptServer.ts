@@ -26,7 +26,6 @@ type StoreArgs = {
 type PromptItArgs = {
   messyText: string;
   strict: boolean;
-  mode: "auto" | "force";
 };
 
 type FeedbackArgs = {
@@ -234,7 +233,6 @@ function parsePromptItArgs(input: unknown): PromptItArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const messyTextRaw = args.messy_text;
   const strictRaw = args.strict;
-  const modeRaw = args.mode;
 
   if (typeof messyTextRaw !== "string" || !messyTextRaw.trim()) {
     throw new Error("messy_text must be a non-empty string.");
@@ -246,11 +244,8 @@ function parsePromptItArgs(input: unknown): PromptItArgs {
   if (strictRaw !== undefined && typeof strictRaw !== "boolean") {
     throw new Error("strict must be a boolean when provided.");
   }
-  if (modeRaw !== undefined && modeRaw !== "auto" && modeRaw !== "force") {
-    throw new Error("mode must be one of: auto, force.");
-  }
 
-  return { messyText: messyTextRaw, strict: strictRaw ?? true, mode: (modeRaw as "auto" | "force" | undefined) ?? "auto" };
+  return { messyText: messyTextRaw, strict: strictRaw ?? true };
 }
 
 function parseFeedbackArgs(input: unknown): FeedbackArgs {
@@ -318,12 +313,6 @@ promptItServer.server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "boolean",
             description:
               "When true (default), prompt_it returns enforcement metadata (task_id, execution_token, required_steps).",
-          },
-          mode: {
-            type: "string",
-            enum: ["auto", "force"],
-            description:
-              "Optional orchestration hint. auto (default) allows host tiny-task fast path; force requires full refinement flow.",
           },
         },
         required: ["messy_text"],

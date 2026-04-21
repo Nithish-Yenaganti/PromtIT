@@ -9,6 +9,9 @@ export function recordFeedback(
   const stmt = db.prepare(`
     INSERT INTO feedback (prompt_id, score, source, metadata)
     VALUES (?, ?, ?, ?)
+    ON CONFLICT DO UPDATE SET
+      metadata = excluded.metadata,
+      created_at = CURRENT_TIMESTAMP
   `);
 
   const metadataText =
