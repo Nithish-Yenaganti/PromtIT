@@ -92,6 +92,41 @@ Restart the extension after saving `config.toml`.
 
 Important: use `src/server.ts` for MCP launch (not `dist/server.js`). The bundled dist runtime can fail native ONNX module resolution in Bun on some machines.
 
+## Claude Code Setup (Stdio Mode)
+
+Quick auto-setup (recommended):
+
+```bash
+bash scripts/setup-claude-code-config.sh
+```
+
+Default write target is `~/.claude/mcp.json`. Override target if needed:
+
+```bash
+bash scripts/setup-claude-code-config.sh --target /path/to/claude-mcp.json
+```
+
+Or print the rendered config without writing:
+
+```bash
+bash scripts/setup-claude-code-config.sh --print
+```
+
+Template file used by the script:
+
+- `claude-code.config.json`
+
+It automatically replaces `/YOUR/ABSOLUTE/PATH` with your real project path and writes the rendered JSON config.
+
+Claude-specific instruction entrypoint for this repo:
+
+- `CLAUDE.md`
+
+`CLAUDE.md` delegates policy to:
+
+- `AGENTS.md` (execution contract)
+- `PROMPTENGINEER.md` (refinement policy)
+
 ## Server Role (Storage + Recall Assembly)
 
 This server is designed as a librarian/orchestrator backend:

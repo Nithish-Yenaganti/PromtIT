@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "prompt_it": {
+      "command": "bun",
+      "args": ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"],
+      "cwd": "/YOUR/ABSOLUTE/PATH",
+      "env": {
+        "TRANSFORMERS_BACKEND": "wasm",
+        "OMP_NUM_THREADS": "1",
+        "ORT_NUM_THREADS": "1",
+        "PROMPTIT_DB_PATH": "/YOUR/ABSOLUTE/PATH/data/memory.db"
+      }
+    }
+  }
+}
