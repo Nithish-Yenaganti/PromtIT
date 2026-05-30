@@ -15,16 +15,18 @@ This project is stdio-only MCP. Use `src/server.ts` as the MCP entrypoint.
   - single rename
   - one-line typo fix
   - quick grep/list/check
-- Medium/large/ambiguous tasks must run full PromptIT flow:
-  1. `prompt_it(messy_text=raw_user_text)`
-  2. Extract `TASK_ID` + `EXECUTION_TOKEN`
-  3. Refine using `PROMPTENGINEER.md`
-  4. `store_refinement(raw_text, refined_text, task_id, execution_token)`
-  5. Execute using refined prompt
-  6. `record_feedback(prompt_id, score, source, metadata, task_id, execution_token)`
+- Medium/large/ambiguous tasks must run full PromptIT review flow:
+  1. `normalize_prompt(messy_text=raw_user_text)`
+  2. Generate the converted prompt from `conversion_context.payload` using `PROMPTENGINEER.md`
+  3. `normalize_prompt(messy_text=raw_user_text, converted_prompt=refined_text)`
+  4. Show `Converted Prompt` and the edit/regenerate/send review state
+  5. Use `regenerate_prompt` when the user requests changes
+  6. `commit_prompt(task_id, execution_token, final_prompt=approved_text, destination="claude")`
+  7. Send/execute the returned `final_prompt`
 
 ### Output Rules
 
-- Print `Converted Prompt` (not raw payload/schema dumps).
+- Print `Converted Prompt` (not raw legacy payload/schema dumps).
+- Treat PromptIT as a tool-only approval protocol; Claude Code owns rendering and final send.
 - Keep status concise and transparent.
 - Do not expose secrets or full absolute local paths in chat.

@@ -1,7 +1,7 @@
 [![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 # PromptIT MCP Server
 
-The PromptIT is a local-first Model Context Protocol (MCP) server designed to refine unstructured user requests into high-fidelity instructions using persistent local memory.
+PromptIT is a local-first Model Context Protocol (MCP) server for turning messy user prompts into reviewable, approval-ready prompt payloads using persistent local memory. It is intentionally a tool layer, not a standalone application: the MCP host owns the UI, editing surface, and final send action.
 
 ## Core Logic
 
@@ -9,7 +9,7 @@ This server implements a Retrieval-Augmented Generation (RAG) workflow. When a u
 
 1. Semantic Fingerprinting: The server uses a local embedding model (Transformers.js) to convert the user's text into a numerical vector.
 2. Memory Retrieval: It queries a local SQLite database to find historically similar prompts and their successful refinements based on vector similarity.
-3. Contextual Assembly: It stores and retrieves previously accepted refinements to improve consistency over time.
+3. Contextual Assembly: It returns conversion context or a structured review payload that the host can render as edit/regenerate/send controls.
 4. Learning Loop: By tracking structured feedback (`score`, `source`, `metadata`), the server adjusts retrieval ranking so higher-quality past refinements are prioritized.
 
 ## System Architecture
@@ -19,7 +19,7 @@ The project is divided into four functional layers:
 * Transport Layer: Manages communication with MCP clients (such as Claude Code or Codex) via Standard Input/Output (stdio).
 * Database Layer: A local SQLite instance that stores raw prompts, refined outputs, and vector embeddings for long-term persistence.
 * Inference Layer: Runs a local instance of the all-MiniLM-L6-v2 model to perform on-device feature extraction without external API calls.
-* Logic Layer: Handles storage, recall, and feedback recording workflows.
+* Protocol Layer: Exposes MCP tools for normalization review, regeneration, commit/approval, storage, recall, and feedback.
 
 ## Why MCP?
 
@@ -128,36 +128,65 @@ Claude-specific instruction entrypoint for this repo:
 - `AGENTS.md` (execution contract)
 - `PROMPTENGINEER.md` (refinement policy)
 
-## Server Role (Storage + Recall Assembly)
+## Server Role (Tool-Only Prompt Approval Protocol)
 
-This server is designed as a librarian/orchestrator backend:
+This server is designed as a librarian/orchestrator backend. It does not render a web UI and does not own final delivery to a chat model. Hosts should treat PromptIT responses as protocol payloads for their own UI.
 
-- `store_refinement`: save `raw_text` + `refined_text` + embedding (requires task_id + execution_token from prompt_it)
-- `prompt_it`: assemble `messy_text + similar refinements + host task`
-- `record_feedback`: store user quality signal (`score`, `source`, `metadata`) (requires task_id + execution_token from prompt_it)
+- `normalize_prompt`: start a review session, recall similar refinements, and return a `promptit.review.v1` payload.
+- `regenerate_prompt`: continue a review session when the user asks for a different version.
+- `commit_prompt`: approve the current or user-edited prompt, store it in memory, record user feedback, and return `final_prompt` for the host to send.
+- `prompt_it`: legacy compatibility tool that assembles `messy_text + similar refinements + host task`.
+- `store_refinement`: legacy storage tool for pre-refined prompt pairs.
+- `record_feedback`: legacy feedback tool for stored refinements.
 
-Refinement generation should be handled by the host/agent (`prompt_engineer`), not by this MCP server.
+PromptIT uses local Transformers.js for embeddings and recall. It does not run a generative LLM. LLM-quality rewriting should be handled by the host/agent (`prompt_engineer`) or another explicit rewrite provider, then passed back into the review protocol.
 
-## Required End-to-End Flow
+## Recommended Review Flow
 
-This project is designed so users provide only messy text. The host agent must automate the rest:
+This project is designed so users provide only messy text. The host agent or MCP client should automate the rest:
 
-1. Call `prompt_it(messy_text=raw_user_text)` and capture `TASK_ID` + `EXECUTION_TOKEN`.
-2. Convert returned payload to a clean system prompt with host-side prompt engineering logic.
-3. Print `Converted Prompt` to chat.
-4. Call `store_refinement(raw_text, refined_text, task_id, execution_token)`.
-5. Print the token/cost comparison returned by `store_refinement` (raw vs refined).
-6. Execute the intended task from `refined_text` (coding, writing, research, planning, support, etc.).
-7. Call `record_feedback(prompt_id, score, source, metadata, task_id, execution_token)` after completion.
+1. Call `normalize_prompt(messy_text=raw_user_text)`.
+2. If the payload status is `needs_host_refinement`, use `conversion_context.payload` to generate `converted_prompt` according to `PROMPTENGINEER.md`.
+3. Call `normalize_prompt(messy_text=raw_user_text, converted_prompt=converted_prompt)` or `regenerate_prompt(..., converted_prompt=converted_prompt)` to put that draft into review state.
+4. Render the `promptit.review.v1` payload in the host as an edit/regenerate/send approval surface.
+5. If the user asks for changes, call `regenerate_prompt(task_id, execution_token, user_feedback=...)`, generate the revised prompt from `regeneration_instruction`, then call `regenerate_prompt(..., converted_prompt=revised_prompt)`.
+6. When the user approves, call `commit_prompt(task_id, execution_token, final_prompt=user_edited_prompt_optional, destination=host_name)`.
+7. Send the returned `final_prompt` to the selected host destination. PromptIT does not own delivery.
 
 Hard order rule:
 
-- For medium/large/ambiguous requests, do not run web search or external tools before calling `prompt_it`.
+- For medium/large/ambiguous requests, do not run web search or external tools before calling `normalize_prompt` or legacy `prompt_it`.
 - Tiny mechanical tasks may use a fast path (single rename, one-line typo fix, quick grep/list/check).
 
 The raw messy text should not be used directly as execution instructions.
-Potential secret-like values (API keys/tokens/private keys) are redacted from the `prompt_it` payload before host-side refinement.
-Potential secret-like values are also redacted before persistence in `store_refinement`, and `record_feedback.metadata` is sanitized/truncated before storage.
+Potential secret-like values (API keys/tokens/private keys) are redacted from PromptIT protocol payloads before host-side refinement.
+Potential secret-like values are also redacted before persistence in `commit_prompt`/`store_refinement`, and feedback metadata is sanitized/truncated before storage.
+
+## Review Payload Shape
+
+`normalize_prompt`, `regenerate_prompt`, and `commit_prompt` return JSON text using this protocol marker:
+
+```json
+{
+  "protocol": "promptit.review.v1",
+  "status": "ready_for_review",
+  "task_id": "...",
+  "execution_token": "...",
+  "original_prompt": "...",
+  "converted_prompt": "...",
+  "plan": [
+    { "id": "review", "label": "Review converted prompt", "state": "ready" },
+    { "id": "approve", "label": "User may edit, regenerate, or send", "state": "available" }
+  ],
+  "actions": ["edit", "regenerate", "send"],
+  "tools": {
+    "regenerate": "regenerate_prompt",
+    "send": "commit_prompt"
+  }
+}
+```
+
+Hosts may render this as buttons, a plan panel, or plain text. The MCP server stays portable by returning structured data instead of owning UI.
 
 ## MCP Enforcement (v3)
 
