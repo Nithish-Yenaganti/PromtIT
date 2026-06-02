@@ -1,6 +1,7 @@
 import { pipeline } from "@xenova/transformers";
+import { EMBEDDING_MODEL, LOCAL_ONLY_MODELS } from "./config";
 
-// Runtime defaults for more stable local inference on Bun/CPU environments.
+// Runtime defaults for stable local inference on Bun/CPU environments.
 if (!process.env.TRANSFORMERS_BACKEND) {
   process.env.TRANSFORMERS_BACKEND = "wasm";
 }
@@ -13,8 +14,6 @@ if (!process.env.ORT_NUM_THREADS) {
 
 let extractor: any = null;
 let extractorInitPromise: Promise<any> | null = null;
-const EMBEDDING_MODEL = process.env.PROMPTIT_EMBEDDING_MODEL?.trim() || "Xenova/all-MiniLM-L6-v2";
-const LOCAL_ONLY_MODELS = process.env.PROMPTIT_LOCAL_MODELS_ONLY === "1";
 
 async function ensureExtractor(): Promise<any> {
   if (extractor) return extractor;
@@ -29,7 +28,6 @@ async function ensureExtractor(): Promise<any> {
       extractor = loaded;
       return loaded;
     })().catch((error) => {
-      // Allow retry on the next call if initialization fails.
       extractorInitPromise = null;
       throw error;
     });
@@ -40,14 +38,10 @@ async function ensureExtractor(): Promise<any> {
 
 export async function getEmbedding(text: string): Promise<number[]> {
   const model = await ensureExtractor();
-
-  // Generate the embedding
   const output = await model(text, {
     pooling: "mean",
     normalize: true,
   });
-
-  // Transformers.js returns a Tensor object; we convert it to a standard JS Array
   return Array.from(output.data);
 }
 

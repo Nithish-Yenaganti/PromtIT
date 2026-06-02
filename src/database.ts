@@ -1,12 +1,31 @@
 import { Database } from "bun:sqlite";
-import path from "path";
 import { mkdirSync } from "fs";
-import os from "os";
+import path from "path";
+import { DATABASE_CANDIDATE_PATHS } from "./config";
 
-const configuredPath = process.env.PROMPTIT_DB_PATH?.trim();
-const projectPath = path.join(process.cwd(), "data", "memory.db");
-const tempPath = path.join(os.tmpdir(), "promptit", "memory.db");
-const homePath = path.join(os.homedir(), ".promptit", "memory.db");
+type PromptHistoryRow = {
+  id: number;
+  raw_prompt: string;
+  refined_prompt: string;
+  embedding: Uint8Array | null;
+  avg_score: number;
+};
+
+type SimilarExample = {
+  id: number;
+  raw_prompt: string;
+  refined_prompt: string;
+  avg_score: number;
+  similarity: number;
+  blended_rank: number;
+};
+
+export type PromptPair = {
+  raw_prompt: string;
+  refined_prompt: string;
+};
+
+export type FeedbackSource = "LSP" | "Agent" | "User";
 
 function uniquePaths(paths: Array<string | undefined>): string[] {
   const seen = new Set<string>();
@@ -25,7 +44,6 @@ function openWritableDatabase(dbPath: string): Database {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const candidate = new Database(dbPath, { create: true });
   try {
-    // Validate writability early so startup never proceeds with a readonly DB.
     candidate.run("CREATE TABLE IF NOT EXISTS __promptit_healthcheck (id INTEGER PRIMARY KEY, ts TEXT)");
     candidate.run("INSERT INTO __promptit_healthcheck (ts) VALUES (CURRENT_TIMESTAMP)");
     candidate.run("DELETE FROM __promptit_healthcheck");
@@ -34,14 +52,14 @@ function openWritableDatabase(dbPath: string): Database {
     try {
       candidate.close();
     } catch {
-      // no-op: close best effort
+      // close is best effort only
     }
     throw error;
   }
 }
 
 function selectDatabase(): { db: Database; dbPath: string } {
-  const candidates = uniquePaths([configuredPath, projectPath, tempPath, homePath]);
+  const candidates = uniquePaths(DATABASE_CANDIDATE_PATHS);
   const errors: string[] = [];
 
   for (const dbPath of candidates) {
@@ -63,14 +81,11 @@ function selectDatabase(): { db: Database; dbPath: string } {
 const selected = selectDatabase();
 export const db = selected.db;
 
-// Setup high-performance mode
 db.run("PRAGMA journal_mode = WAL;");
-db.run("PRAGMA busy_timeout = 5000;"); //wait up to 5s i DB is busy
+db.run("PRAGMA busy_timeout = 5000;");
 db.run("PRAGMA foreign_keys = ON;");
 
-
-export function initDB() {
-  // table for prompts and their "meaning" (embeddings)
+export function initDatabase(): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS prompt_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +96,6 @@ export function initDB() {
     ) STRICT;
   `);
 
-  // table for learning from the user
   db.run(`
     CREATE TABLE IF NOT EXISTS feedback (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +114,7 @@ export function initDB() {
   ensureDedupeIndexes();
 }
 
-function ensureExpertLibrarySchema() {
+function ensureExpertLibrarySchema(): void {
   const createWithVectorType = `
     CREATE TABLE IF NOT EXISTS expert_library (
       slug TEXT PRIMARY KEY,
@@ -132,7 +146,7 @@ function ensureExpertLibrarySchema() {
   }
 }
 
-function ensureFeedbackSchema() {
+function ensureFeedbackSchema(): void {
   const columns = db.prepare("PRAGMA table_info(feedback)").all() as Array<{ name?: string }>;
   const existing = new Set(
     columns.map((col) => col.name).filter((name): name is string => Boolean(name))
@@ -151,7 +165,7 @@ function ensureFeedbackSchema() {
   }
 }
 
-function ensureUserMemorySchema() {
+function ensureUserMemorySchema(): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS user_memory (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,8 +179,7 @@ function ensureUserMemorySchema() {
   `);
 }
 
-function ensureDedupeIndexes() {
-  // Keep only the latest duplicate prompt pair before adding unique index.
+function ensureDedupeIndexes(): void {
   db.run(`
     DELETE FROM prompt_history
     WHERE id NOT IN (
@@ -180,7 +193,6 @@ function ensureDedupeIndexes() {
     ON prompt_history(raw_prompt, refined_prompt);
   `);
 
-  // Keep only the latest duplicate feedback tuple before adding dedupe index.
   db.run(`
     DELETE FROM feedback
     WHERE id NOT IN (
@@ -195,9 +207,6 @@ function ensureDedupeIndexes() {
   `);
 }
 
-/**
- * Helper to save a prompt with its embedding
- */
 export function savePrompt(raw: string, refined: string, embedding?: number[] | null): number {
   const stmt = db.prepare(`
     INSERT INTO prompt_history (raw_prompt, refined_prompt, embedding)
@@ -207,7 +216,7 @@ export function savePrompt(raw: string, refined: string, embedding?: number[] | 
       created_at = CURRENT_TIMESTAMP
     RETURNING id
   `);
-  
+
   const buffer =
     Array.isArray(embedding) && embedding.length > 0
       ? Buffer.from(new Float32Array(embedding).buffer)
@@ -219,39 +228,84 @@ export function savePrompt(raw: string, refined: string, embedding?: number[] | 
   return row.id;
 }
 
-export function getRecentRefinements(limit = 3): Array<{ raw_prompt: string; refined_prompt: string }> {
+export function recordFeedback(
+  promptId: number,
+  score: number,
+  source: FeedbackSource,
+  metadata?: unknown
+): void {
+  const stmt = db.prepare(`
+    INSERT INTO feedback (prompt_id, score, source, metadata)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT DO UPDATE SET
+      metadata = excluded.metadata,
+      created_at = CURRENT_TIMESTAMP
+  `);
+
+  const metadataText = metadata === undefined ? null : JSON.stringify(metadata);
+  stmt.run(promptId, score, source, metadataText);
+}
+
+export function getRecentRefinements(limit = 3): PromptPair[] {
   const safeLimit = Math.max(1, Math.min(limit, 20));
   return db
     .prepare(
       "SELECT raw_prompt, refined_prompt FROM prompt_history ORDER BY created_at DESC LIMIT ?"
     )
-    .all(safeLimit) as Array<{ raw_prompt: string; refined_prompt: string }>;
+    .all(safeLimit) as PromptPair[];
 }
 
-type UpsertExpertArgs = {
-  slug: string;
-  role: string;
-  content: string;
-  category: string;
-  embedding?: number[] | null;
-};
+export function getContextualExamples(currentVector: number[]): string {
+  const similarityWeight = 0.8;
+  const feedbackWeight = 0.2;
 
-export function upsertExpert(args: UpsertExpertArgs): void {
-  const { slug, role, content, category, embedding } = args;
-  const stmt = db.prepare(`
-    INSERT INTO expert_library (slug, role, content, category, embedding)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(slug) DO UPDATE SET
-      role = excluded.role,
-      content = excluded.content,
-      category = excluded.category,
-      embedding = excluded.embedding
-  `);
+  const history = db
+    .prepare(
+      `SELECT
+         p.id,
+         p.raw_prompt,
+         p.refined_prompt,
+         p.embedding,
+         COALESCE(AVG(f.score), 0.5) AS avg_score
+       FROM prompt_history p
+       LEFT JOIN feedback f ON f.prompt_id = p.id
+       GROUP BY p.id, p.raw_prompt, p.refined_prompt, p.embedding, p.created_at
+       ORDER BY p.created_at DESC
+       LIMIT 50`
+    )
+    .all() as PromptHistoryRow[];
 
-  const buffer =
-    Array.isArray(embedding) && embedding.length > 0
-      ? Buffer.from(new Float32Array(embedding).buffer)
-      : null;
+  const examples = history
+    .map((row): SimilarExample | null => {
+      if (!row?.embedding) return null;
+      const rowVector = decodeFloat32Vector(row.embedding);
+      if (!rowVector || rowVector.length !== currentVector.length) return null;
+      const similarity = dotProduct(currentVector, rowVector);
+      const blended_rank = similarity * similarityWeight + row.avg_score * feedbackWeight;
+      return { ...row, similarity, blended_rank };
+    })
+    .filter((ex): ex is SimilarExample => ex != null)
+    .sort((a, b) => b.blended_rank - a.blended_rank)
+    .slice(0, 3);
 
-  stmt.run(slug, role, content, category, buffer);
+  return examples
+    .map(
+      (ex) =>
+        `User: ${ex.raw_prompt}\nRefined: ${ex.refined_prompt}\nFeedbackScore: ${ex.avg_score.toFixed(2)}`
+    )
+    .join("\n\n");
+}
+
+function decodeFloat32Vector(bytes: Uint8Array | null): Float32Array | null {
+  if (!bytes || bytes.byteLength % 4 !== 0) return null;
+  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+}
+
+function dotProduct(a: number[], b: ArrayLike<number>): number {
+  if (a.length !== b.length) return 0;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += a[i]! * b[i]!;
+  }
+  return sum;
 }

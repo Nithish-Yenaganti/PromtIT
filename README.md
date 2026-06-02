@@ -16,10 +16,25 @@ This server implements a Retrieval-Augmented Generation (RAG) workflow. When a u
 
 The project is divided into four functional layers:
 
-* Transport Layer: Manages communication with MCP clients (such as Claude Code or Codex) via Standard Input/Output (stdio).
-* Database Layer: A local SQLite instance that stores raw prompts, refined outputs, and vector embeddings for long-term persistence.
-* Inference Layer: Runs a local instance of the all-MiniLM-L6-v2 model to perform on-device feature extraction without external API calls.
-* Protocol Layer: Exposes MCP tools for normalization review, regeneration, commit/approval, storage, recall, and feedback.
+* `src/server.ts`: Core MCP server setup, stdio transport, and tool registration.
+* `src/database.ts`: SQLite connection, embedding storage, prompt history CRUD, semantic recall, and feedback writes.
+* `src/refiner.ts`: PromptIT protocol orchestration for normalize, regenerate, commit, and legacy compatibility.
+* `src/embeddings.ts`: Local Transformers.js embedding pipeline for semantic search.
+* `src/config.ts`: DB paths, model settings, token limits, and runtime thresholds.
+
+## Project Structure
+
+```text
+promptit-mcp/
+├── src/
+│   ├── server.ts       # Core MCP server setup and tool registration
+│   ├── database.ts     # SQLite connection, embedding storage, history CRUD, feedback
+│   ├── refiner.ts      # PromptIT review protocol and local prompt orchestration
+│   ├── embeddings.ts   # Local embedding generation for semantic search
+│   └── config.ts       # DB paths, local model settings, limits, thresholds
+├── package.json        # Bun/TypeScript dependencies and scripts
+└── README.md
+```
 
 ## Why MCP?
 
@@ -46,7 +61,7 @@ OMP_NUM_THREADS=1
 ORT_NUM_THREADS=1
 ```
 
-These are also defaulted automatically by `src/memory/embeddings.ts` when not set.
+These are also defaulted automatically by `src/embeddings.ts` when not set.
 
 ## Codex Extension Setup (Stdio Mode)
 
@@ -76,16 +91,14 @@ description = "Specialist in converting messy user thoughts into high-fidelity e
 mcp_servers = ["prompt_it"]
 developer_instructions = """
 You are a Master Prompt Engineer. When the user provides a vague request:
-0. Do not run web search, file edits, code execution, or any other tools before prompt_it for a new request.
-1. Call prompt_it.prompt_it with messy_text.
-2. Capture TASK_ID and EXECUTION_TOKEN from the ENFORCEMENT block.
-3. Use the returned payload (messy text + similar refinements) to rewrite into a structured expert system prompt.
-4. Print this to chat exactly as:
-   Converted Prompt
-   <converted prompt body>
-5. Call prompt_it.store_refinement with raw_text, refined_text, task_id, and execution_token.
-6. Continue execution immediately using the refined prompt for the inferred intent type and user seniority.
-7. Call prompt_it.record_feedback with prompt_id, score, source, metadata, task_id, and execution_token.
+0. Do not run web search, file edits, code execution, or any other tools before normalize_prompt for a new non-tiny request.
+1. Call prompt_it.normalize_prompt with messy_text.
+2. If status is needs_host_refinement, use conversion_context.payload to rewrite into a structured expert system prompt.
+3. Call prompt_it.normalize_prompt again with messy_text and converted_prompt.
+4. Print Converted Prompt and concise edit/regenerate/send review actions.
+5. Use prompt_it.regenerate_prompt when the user requests a different version.
+6. Call prompt_it.commit_prompt with the approved final_prompt.
+7. Send or execute the returned final_prompt.
 """
 ```
 
@@ -187,6 +200,30 @@ Potential secret-like values are also redacted before persistence in `commit_pro
 ```
 
 Hosts may render this as buttons, a plan panel, or plain text. The MCP server stays portable by returning structured data instead of owning UI.
+
+## Runtime Flow
+
+```text
+[User Messy Prompt]
+       |
+       v
+[Host App / MCP Client] -- normalize_prompt --> [PromptIT MCP Server]
+       |                                             |
+       |                                             v
+       |                                  [SQLite history + feedback]
+       |                                             |
+       |                                             v
+[Host UI Plan/Review Screen] <-- promptit.review.v1 payload
+       |
+       +--> optional user edit
+       +--> optional regenerate_prompt
+       |
+       v
+[User Clicks Send] -- commit_prompt --> [SQLite history updated]
+       |
+       v
+[Host sends final_prompt to main LLM]
+```
 
 ## MCP Enforcement (v3)
 

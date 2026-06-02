@@ -1,5 +1,5 @@
 {
-  "name": "prompt-it",
+  "name": "promptit-mcp",
   "version": "3.0.0",
   "type": "module",
   "private": true,
@@ -20,5 +20,5 @@
     "start:dist": "bun run ./dist/server.js",
     "prompts:chat:engineering": "bun run ./scripts/fetch-prompts-chat-engineering.ts"
   },
-  "module": "index.ts"
+  "module": "src/server.ts"
 }
