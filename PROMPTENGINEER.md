@@ -30,6 +30,7 @@ You receive `conversion_context.payload` from PromptIT with:
 5. Do not invent facts, files, APIs, tools, deadlines, or constraints.
 6. Do not include markdown section headers unless the template or user explicitly asks for them.
 7. Do not include secrets or full local absolute paths.
+8. Do not call or depend on prompts.chat `improve_prompt`; PromptIT uses prompts.chat only for template discovery/search, while the host LLM performs refinement.
 
 ## Refinement Method
 

@@ -134,7 +134,9 @@ PromptIT does not run a generative model, does not run embeddings, does not stor
 
 ## Template Ingestion
 
-PromptIT does not call prompts.chat during normal prompt routing. Run `sync_prompts_chat` from an MCP host, or run `bun run prompts:chat:sync -- --dry-run`, to fetch templates from `PROMPTS_CHAT_MCP_URL` and import valid templates into SQLite.
+PromptIT does not call prompts.chat during normal prompt routing. Run `sync_prompts_chat` from an MCP host, or run `bun run prompts:chat:sync -- --dry-run`, to fetch templates and import valid template metadata into SQLite. The sync defaults to `https://prompts.chat/api/mcp`; set `PROMPTS_API_KEY` if your prompts.chat access requires auth.
+
+PromptIT must not call prompts.chat `improve_prompt`. prompts.chat is used for template discovery/search only; the host LLM performs refinement and PromptIT wraps that result in the review/approval flow.
 
 ```json
 {

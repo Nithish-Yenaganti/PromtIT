@@ -4,6 +4,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { GetPromptResultSchema, ListPromptsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { upsertTemplates, type TemplateRecord } from "./database";
 
+const DEFAULT_PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp";
+
 export type PromptsChatPromptItem = {
   name: string;
   title?: string;
@@ -130,10 +132,10 @@ const INTENT_CONFIGS: IntentConfig[] = [
 export async function syncPromptsChatTemplates(
   options: SyncPromptsChatOptions = {}
 ): Promise<SyncPromptsChatResult> {
-  const serverUrl = options.serverUrl?.trim() || process.env.PROMPTS_CHAT_MCP_URL?.trim();
-  if (!serverUrl) {
-    throw new Error("PROMPTS_CHAT_MCP_URL or server_url is required.");
-  }
+  const serverUrl =
+    options.serverUrl?.trim() ||
+    process.env.PROMPTS_CHAT_MCP_URL?.trim() ||
+    DEFAULT_PROMPTS_CHAT_MCP_URL;
 
   const keywords = normalizeKeywords(options.keywords);
   const limit = normalizeLimit(options.limit);
@@ -296,7 +298,10 @@ function normalizeLimit(limit?: number): number | undefined {
 }
 
 function buildHeaders(): Record<string, string> | undefined {
-  const bearer = process.env.PROMPTS_CHAT_BEARER_TOKEN?.trim() || process.env.PROMPTS_CHAT_API_KEY?.trim();
+  const bearer =
+    process.env.PROMPTS_API_KEY?.trim() ||
+    process.env.PROMPTS_CHAT_BEARER_TOKEN?.trim() ||
+    process.env.PROMPTS_CHAT_API_KEY?.trim();
   if (!bearer) return undefined;
   return { Authorization: `Bearer ${bearer}` };
 }

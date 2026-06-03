@@ -164,7 +164,7 @@ export function getPromptItToolDefinitions() {
           server_url: {
             type: "string",
             description:
-              "Optional prompts.chat MCP URL. Defaults to PROMPTS_CHAT_MCP_URL.",
+              "Optional prompts.chat MCP URL. Defaults to PROMPTS_CHAT_MCP_URL or https://prompts.chat/api/mcp.",
           },
         },
       },
