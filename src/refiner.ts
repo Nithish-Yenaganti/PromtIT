@@ -4,8 +4,18 @@ import {
   MAX_TEXT_CHARS,
   parsePositiveNumberEnv,
 } from "./config";
-import { syncPromptsChatTemplates } from "./promptsChatSync";
-import { recordTemplateStat, selectBestTemplate, type TemplateMatch } from "./templates";
+import {
+  bootstrapPromptsChatTemplates,
+  shouldSyncCategoryMore,
+  syncPromptsChatForCategory,
+  syncPromptsChatTemplates,
+} from "./promptsChatSync";
+import {
+  recordTemplateCategoryStat,
+  recordTemplateStat,
+  selectBestTemplate,
+  type TemplateMatch,
+} from "./templates";
 
 type NormalizeArgs = {
   messyText: string;
@@ -33,6 +43,13 @@ type SyncPromptsChatArgs = {
   limit?: number;
   dryRun?: boolean;
   serverUrl?: string;
+};
+
+type BootstrapPromptsChatArgs = {
+  templatesPerCategory?: number;
+  dryRun?: boolean;
+  serverUrl?: string;
+  force?: boolean;
 };
 
 type RefinementSession = {
@@ -169,6 +186,33 @@ export function getPromptItToolDefinitions() {
         },
       },
     },
+    {
+      name: "bootstrap_prompts_chat",
+      description:
+        "Seeds PromptIT with a small prompts.chat starter set: 3 templates per category by default, plus optional forced retry.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          templates_per_category: {
+            type: "number",
+            description: "Templates to import per category. Defaults to 3.",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "When true, validates and summarizes without writing to SQLite.",
+          },
+          server_url: {
+            type: "string",
+            description:
+              "Optional prompts.chat MCP URL. Must be HTTPS and allowed by PromptIT URL allowlist.",
+          },
+          force: {
+            type: "boolean",
+            description: "When true, sync categories even if they were already bootstrapped.",
+          },
+        },
+      },
+    },
   ];
 }
 
@@ -177,6 +221,7 @@ export async function handlePromptItToolCall(name: string, args: unknown) {
   if (name === "regenerate_prompt") return handleRegeneratePrompt(args);
   if (name === "commit_prompt") return handleCommitPrompt(args);
   if (name === "sync_prompts_chat") return handleSyncPromptsChat(args);
+  if (name === "bootstrap_prompts_chat") return handleBootstrapPromptsChat(args);
   throw new Error("Tool not found");
 }
 
@@ -187,6 +232,17 @@ async function handleSyncPromptsChat(input: unknown) {
     limit,
     dryRun,
     serverUrl,
+  });
+  return jsonToolResult(result);
+}
+
+async function handleBootstrapPromptsChat(input: unknown) {
+  const { templatesPerCategory, dryRun, serverUrl, force } = parseBootstrapPromptsChatArgs(input);
+  const result = await bootstrapPromptsChatTemplates({
+    templatesPerCategory,
+    dryRun,
+    serverUrl,
+    force,
   });
   return jsonToolResult(result);
 }
@@ -252,8 +308,10 @@ function handleRegeneratePrompt(input: unknown) {
     session.currentPrompt = sanitizedConverted.text;
     session.revisionCount += 1;
     recordTemplateStat(session.templateId, "regenerated");
+    recordTemplateCategoryStat(session.templateMatch?.template, "regenerated");
   } else {
     recordTemplateStat(session.templateId, "regenerated");
+    recordTemplateCategoryStat(session.templateMatch?.template, "regenerated");
   }
 
   const regenerationInstruction = [
@@ -321,7 +379,13 @@ function handleCommitPrompt(input: unknown) {
   const wasEdited = session.currentPrompt !== undefined && sanitizedFinal.text !== session.currentPrompt;
   recordTemplateStat(session.templateId, "accepted");
   recordTemplateStat(session.templateId, "executed");
-  if (wasEdited) recordTemplateStat(session.templateId, "edited");
+  recordTemplateCategoryStat(session.templateMatch?.template, "accepted");
+  recordTemplateCategoryStat(session.templateMatch?.template, "executed");
+  if (wasEdited) {
+    recordTemplateStat(session.templateId, "edited");
+    recordTemplateCategoryStat(session.templateMatch?.template, "edited");
+  }
+  scheduleAdaptiveCategorySync(session.templateMatch?.template);
 
   session.currentPrompt = sanitizedFinal.text;
   session.committed = true;
@@ -654,6 +718,44 @@ function parseSyncPromptsChatArgs(input: unknown): SyncPromptsChatArgs {
     dryRun: typeof dryRunRaw === "boolean" ? dryRunRaw : undefined,
     serverUrl: typeof serverUrlRaw === "string" ? serverUrlRaw : undefined,
   };
+}
+
+function parseBootstrapPromptsChatArgs(input: unknown): BootstrapPromptsChatArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const templatesPerCategoryRaw = args.templates_per_category;
+  const dryRunRaw = args.dry_run;
+  const serverUrlRaw = args.server_url;
+  const forceRaw = args.force;
+
+  assertOptionalString(serverUrlRaw, "server_url");
+  if (templatesPerCategoryRaw !== undefined && typeof templatesPerCategoryRaw !== "number") {
+    throw new Error("templates_per_category must be a number.");
+  }
+  if (dryRunRaw !== undefined && typeof dryRunRaw !== "boolean") {
+    throw new Error("dry_run must be a boolean.");
+  }
+  if (forceRaw !== undefined && typeof forceRaw !== "boolean") {
+    throw new Error("force must be a boolean.");
+  }
+
+  return {
+    templatesPerCategory:
+      typeof templatesPerCategoryRaw === "number" ? templatesPerCategoryRaw : undefined,
+    dryRun: typeof dryRunRaw === "boolean" ? dryRunRaw : undefined,
+    serverUrl: typeof serverUrlRaw === "string" ? serverUrlRaw : undefined,
+    force: typeof forceRaw === "boolean" ? forceRaw : undefined,
+  };
+}
+
+function scheduleAdaptiveCategorySync(template: TemplateMatch["template"] | undefined): void {
+  if (!template) return;
+  const category = template.task_type === "review" ? "review" : template.intent_type;
+  if (!shouldSyncCategoryMore(category)) return;
+
+  syncPromptsChatForCategory(category).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`PromptIT adaptive prompts.chat sync skipped: ${message}\n`);
+  });
 }
 
 function assertString(value: unknown, name: string): asserts value is string {

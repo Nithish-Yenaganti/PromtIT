@@ -1,6 +1,7 @@
 import {
   getTemplateStats,
   listTemplates,
+  recordCategoryEvent,
   recordTemplateEvent,
   type TemplateRecord,
   type TemplateStats,
@@ -80,11 +81,24 @@ export function selectBestTemplate(messyText: string): TemplateMatch {
   }
 
   recordTemplateEvent(best.template.id, "selected");
+  recordCategoryEvent(templateUsageCategory(best.template), "selected");
   return best;
 }
 
 export function recordTemplateStat(templateId: string, event: TemplateStatsEvent): void {
   recordTemplateEvent(templateId, event);
+}
+
+export function recordTemplateCategoryStat(
+  template: TemplateRecord | undefined,
+  event: TemplateStatsEvent
+): void {
+  if (!template) return;
+  recordCategoryEvent(templateUsageCategory(template), event);
+}
+
+function templateUsageCategory(template: TemplateRecord): string {
+  return template.task_type === "review" ? "review" : template.intent_type;
 }
 
 function scoreTemplate(

@@ -42,6 +42,28 @@ export type TemplateStats = {
   quality_score: number;
 };
 
+export type CategoryStatsEvent =
+  | "selected"
+  | "accepted"
+  | "edited"
+  | "regenerated"
+  | "rejected"
+  | "executed"
+  | "synced";
+
+export type CategoryStats = {
+  category: string;
+  selected_count: number;
+  accepted_count: number;
+  edited_count: number;
+  regenerated_count: number;
+  rejected_count: number;
+  executed_count: number;
+  synced_count: number;
+  last_used_at: string | null;
+  last_synced_at: string | null;
+};
+
 function uniquePaths(paths: Array<string | undefined>): string[] {
   const seen = new Set<string>();
   const ordered: string[] = [];
@@ -134,6 +156,21 @@ export function initDatabase(): void {
       last_used_at TEXT,
       quality_score REAL NOT NULL DEFAULT 0.5 CHECK (quality_score >= 0 AND quality_score <= 1),
       FOREIGN KEY(template_id) REFERENCES template_cache(id) ON DELETE CASCADE
+    ) STRICT;
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS category_stats (
+      category TEXT PRIMARY KEY,
+      selected_count INTEGER NOT NULL DEFAULT 0,
+      accepted_count INTEGER NOT NULL DEFAULT 0,
+      edited_count INTEGER NOT NULL DEFAULT 0,
+      regenerated_count INTEGER NOT NULL DEFAULT 0,
+      rejected_count INTEGER NOT NULL DEFAULT 0,
+      executed_count INTEGER NOT NULL DEFAULT 0,
+      synced_count INTEGER NOT NULL DEFAULT 0,
+      last_used_at TEXT,
+      last_synced_at TEXT
     ) STRICT;
   `);
 
@@ -265,6 +302,75 @@ export function recordTemplateEvent(templateId: string, event: TemplateStatsEven
            END
        ))`
   ).run(templateId, event, event, event);
+}
+
+export function recordCategoryEvent(category: string, event: CategoryStatsEvent): void {
+  const normalized = normalizeCategoryName(category);
+  if (!normalized) return;
+
+  const columnByEvent: Record<CategoryStatsEvent, string> = {
+    selected: "selected_count",
+    accepted: "accepted_count",
+    edited: "edited_count",
+    regenerated: "regenerated_count",
+    rejected: "rejected_count",
+    executed: "executed_count",
+    synced: "synced_count",
+  };
+  const column = columnByEvent[event];
+  const usedAt = event === "synced" ? "last_used_at" : "CURRENT_TIMESTAMP";
+  const syncedAt = event === "synced" ? "CURRENT_TIMESTAMP" : "last_synced_at";
+
+  db.prepare(
+    `INSERT INTO category_stats (category, ${column}, last_used_at, last_synced_at)
+     VALUES (?, 1, ${event === "synced" ? "NULL" : "CURRENT_TIMESTAMP"}, ${event === "synced" ? "CURRENT_TIMESTAMP" : "NULL"})
+     ON CONFLICT(category) DO UPDATE SET
+       ${column} = ${column} + 1,
+       last_used_at = ${usedAt},
+       last_synced_at = ${syncedAt}`
+  ).run(normalized);
+}
+
+export function getCategoryStats(category: string): CategoryStats {
+  const normalized = normalizeCategoryName(category);
+  const row = db
+    .prepare(
+      `SELECT category, selected_count, accepted_count, edited_count, regenerated_count,
+              rejected_count, executed_count, synced_count, last_used_at, last_synced_at
+       FROM category_stats
+       WHERE category = ?`
+    )
+    .get(normalized) as CategoryStats | undefined;
+
+  if (row) return row;
+
+  return {
+    category: normalized,
+    selected_count: 0,
+    accepted_count: 0,
+    edited_count: 0,
+    regenerated_count: 0,
+    rejected_count: 0,
+    executed_count: 0,
+    synced_count: 0,
+    last_used_at: null,
+    last_synced_at: null,
+  };
+}
+
+export function listCategoryStats(): CategoryStats[] {
+  return db
+    .prepare(
+      `SELECT category, selected_count, accepted_count, edited_count, regenerated_count,
+              rejected_count, executed_count, synced_count, last_used_at, last_synced_at
+       FROM category_stats
+       ORDER BY executed_count DESC, accepted_count DESC, selected_count DESC`
+    )
+    .all() as CategoryStats[];
+}
+
+function normalizeCategoryName(category: string): string {
+  return category.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 function seedDefaultTemplates(): void {

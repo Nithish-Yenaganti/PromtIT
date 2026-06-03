@@ -6,7 +6,13 @@ import {
   GetPromptResultSchema,
   ListPromptsResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { initDatabase, upsertTemplates, type TemplateRecord } from "./database";
+import {
+  getCategoryStats,
+  initDatabase,
+  recordCategoryEvent,
+  upsertTemplates,
+  type TemplateRecord,
+} from "./database";
 
 const DEFAULT_PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp";
 const ALLOWED_MCP_URL_ENV = "PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS";
@@ -49,6 +55,13 @@ export type SyncPromptsChatOptions = {
   serverUrl?: string;
 };
 
+export type BootstrapPromptsChatOptions = {
+  templatesPerCategory?: number;
+  dryRun?: boolean;
+  serverUrl?: string;
+  force?: boolean;
+};
+
 export type TemplateValidationError = {
   prompt_name: string;
   reason: string;
@@ -72,6 +85,26 @@ export type SyncPromptsChatResult = {
   errors: TemplateValidationError[];
 };
 
+export type BootstrapPromptsChatResult = {
+  source: "prompts.chat";
+  dry_run: boolean;
+  templates_per_category: number;
+  categories: Array<{
+    category: string;
+    keywords: string[];
+    fetched_count: number;
+    imported_count: number;
+    failed_count: number;
+    skipped: boolean;
+    reason?: string;
+  }>;
+  totals: {
+    fetched_count: number;
+    imported_count: number;
+    failed_count: number;
+  };
+};
+
 type IntentConfig = {
   intent_type: string;
   domain: string;
@@ -88,6 +121,34 @@ const DEFAULT_KEYWORDS = [
   "technical research",
   "clear writing",
 ];
+
+export const PROMPTS_CHAT_BOOTSTRAP_CATEGORIES = [
+  {
+    category: "coding",
+    keywords: ["software implementation", "typescript build", "bug fix"],
+  },
+  {
+    category: "review",
+    keywords: ["code review", "bug review", "security review"],
+  },
+  {
+    category: "planning",
+    keywords: ["mcp architecture", "cloud architecture", "local architecture"],
+  },
+  {
+    category: "research",
+    keywords: ["technical research", "compare latest tools", "cite sources"],
+  },
+  {
+    category: "writing",
+    keywords: ["clear writing", "two paragraph explanation", "documentation writing"],
+  },
+] as const;
+
+const DEFAULT_BOOTSTRAP_TEMPLATES_PER_CATEGORY = 3;
+const DEFAULT_ADAPTIVE_SYNC_LIMIT = 3;
+const DEFAULT_ADAPTIVE_SELECTED_THRESHOLD = 8;
+const DEFAULT_ADAPTIVE_EXECUTED_THRESHOLD = 3;
 
 const INTENT_CONFIGS: IntentConfig[] = [
   {
@@ -302,6 +363,96 @@ export async function syncPromptsChatTemplates(
   } finally {
     await transport.close();
   }
+}
+
+export async function bootstrapPromptsChatTemplates(
+  options: BootstrapPromptsChatOptions = {}
+): Promise<BootstrapPromptsChatResult> {
+  initDatabase();
+
+  const templatesPerCategory = normalizeLimit(
+    options.templatesPerCategory ?? DEFAULT_BOOTSTRAP_TEMPLATES_PER_CATEGORY
+  );
+  const dryRun = options.dryRun ?? false;
+  const categories: BootstrapPromptsChatResult["categories"] = [];
+
+  for (const config of PROMPTS_CHAT_BOOTSTRAP_CATEGORIES) {
+    const stats = getCategoryStats(config.category);
+    if (!options.force && !dryRun && stats.synced_count > 0) {
+      categories.push({
+        category: config.category,
+        keywords: [...config.keywords],
+        fetched_count: 0,
+        imported_count: 0,
+        failed_count: 0,
+        skipped: true,
+        reason: "category already synced",
+      });
+      continue;
+    }
+
+    try {
+      const result = await syncPromptsChatTemplates({
+        keywords: [...config.keywords],
+        limit: templatesPerCategory,
+        dryRun,
+        serverUrl: options.serverUrl,
+      });
+      if (!dryRun && result.imported_count > 0) {
+        recordCategoryEvent(config.category, "synced");
+      }
+      categories.push({
+        category: config.category,
+        keywords: [...config.keywords],
+        fetched_count: result.fetched_count,
+        imported_count: result.imported_count,
+        failed_count: result.failed_count,
+        skipped: false,
+      });
+    } catch (error: unknown) {
+      categories.push({
+        category: config.category,
+        keywords: [...config.keywords],
+        fetched_count: 0,
+        imported_count: 0,
+        failed_count: 1,
+        skipped: false,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    source: "prompts.chat",
+    dry_run: dryRun,
+    templates_per_category: templatesPerCategory ?? DEFAULT_BOOTSTRAP_TEMPLATES_PER_CATEGORY,
+    categories,
+    totals: {
+      fetched_count: categories.reduce((sum, item) => sum + item.fetched_count, 0),
+      imported_count: categories.reduce((sum, item) => sum + item.imported_count, 0),
+      failed_count: categories.reduce((sum, item) => sum + item.failed_count, 0),
+    },
+  };
+}
+
+export async function syncPromptsChatForCategory(category: string): Promise<SyncPromptsChatResult> {
+  const config = PROMPTS_CHAT_BOOTSTRAP_CATEGORIES.find((item) => item.category === category);
+  const keywords = config?.keywords ?? [category];
+  const result = await syncPromptsChatTemplates({
+    keywords: [...keywords],
+    limit: DEFAULT_ADAPTIVE_SYNC_LIMIT,
+  });
+  if (result.imported_count > 0) {
+    recordCategoryEvent(category, "synced");
+  }
+  return result;
+}
+
+export function shouldSyncCategoryMore(category: string): boolean {
+  const stats = getCategoryStats(category);
+  const selectedTarget = Math.max(1, (stats.synced_count + 1) * DEFAULT_ADAPTIVE_SELECTED_THRESHOLD);
+  const executedTarget = Math.max(1, (stats.synced_count + 1) * DEFAULT_ADAPTIVE_EXECUTED_THRESHOLD);
+  return stats.selected_count >= selectedTarget || stats.executed_count >= executedTarget;
 }
 
 export function normalizePromptToTemplate(

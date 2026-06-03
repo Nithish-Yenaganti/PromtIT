@@ -14,6 +14,8 @@ PROMPTIT_DB_PATH = "/YOUR/ABSOLUTE/PATH/data/promptit.db"
 # PROMPTS_API_KEY = "YOUR_PROMPTS_CHAT_API_KEY"
 # PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS = "https://prompts.chat/api/mcp"
 # PROMPTIT_ALLOWED_MCP_ORIGINS = "https://prompts.chat"
+# Set to "1" if you want to disable best-effort startup bootstrap sync.
+# PROMPTIT_DISABLE_BOOTSTRAP_SYNC = "1"
 
 [agents.prompt_engineer]
 description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
