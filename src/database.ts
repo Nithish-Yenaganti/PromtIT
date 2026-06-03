@@ -3,29 +3,44 @@ import { mkdirSync } from "fs";
 import path from "path";
 import { DATABASE_CANDIDATE_PATHS } from "./config";
 
-type PromptHistoryRow = {
-  id: number;
-  raw_prompt: string;
-  refined_prompt: string;
-  embedding: Uint8Array | null;
-  avg_score: number;
+export type TemplateStatsEvent =
+  | "selected"
+  | "accepted"
+  | "edited"
+  | "regenerated"
+  | "rejected"
+  | "executed";
+
+export type TemplateRecord = {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+  version: string;
+  intent_type: string;
+  domain: string;
+  task_type: string;
+  tags: string;
+  seniority_level: string;
+  output_style: string;
+  instructions: string;
+  expected_output: string;
+  quality_score: number;
+  created_at?: string;
+  updated_at?: string;
 };
 
-type SimilarExample = {
-  id: number;
-  raw_prompt: string;
-  refined_prompt: string;
-  avg_score: number;
-  similarity: number;
-  blended_rank: number;
+export type TemplateStats = {
+  template_id: string;
+  selected_count: number;
+  accepted_count: number;
+  edited_count: number;
+  regenerated_count: number;
+  rejected_count: number;
+  executed_count: number;
+  last_used_at: string | null;
+  quality_score: number;
 };
-
-export type PromptPair = {
-  raw_prompt: string;
-  refined_prompt: string;
-};
-
-export type FeedbackSource = "LSP" | "Agent" | "User";
 
 function uniquePaths(paths: Array<string | undefined>): string[] {
   const seen = new Set<string>();
@@ -87,225 +102,268 @@ db.run("PRAGMA foreign_keys = ON;");
 
 export function initDatabase(): void {
   db.run(`
-    CREATE TABLE IF NOT EXISTS prompt_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      raw_prompt TEXT NOT NULL,
-      refined_prompt TEXT NOT NULL,
-      embedding BLOB,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    ) STRICT;
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS feedback (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      prompt_id INTEGER NOT NULL,
-      score REAL NOT NULL CHECK (score >= 0 AND score <= 1),
-      source TEXT NOT NULL CHECK (source IN ('LSP', 'Agent', 'User')),
-      metadata TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(prompt_id) REFERENCES prompt_history(id)
-    ) STRICT;
-  `);
-
-  ensureExpertLibrarySchema();
-  ensureUserMemorySchema();
-  ensureFeedbackSchema();
-  ensureDedupeIndexes();
-}
-
-function ensureExpertLibrarySchema(): void {
-  const createWithVectorType = `
-    CREATE TABLE IF NOT EXISTS expert_library (
-      slug TEXT PRIMARY KEY,
-      role TEXT,
-      content TEXT,
-      category TEXT,
-      embedding F32_BLOB
-    );
-  `;
-
-  const createWithBlob = `
-    CREATE TABLE IF NOT EXISTS expert_library (
-      slug TEXT PRIMARY KEY,
-      role TEXT,
-      content TEXT,
-      category TEXT,
-      embedding BLOB
-    ) STRICT;
-  `;
-
-  try {
-    db.run(createWithVectorType);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(
-      `expert_library: F32_BLOB unavailable (${message}). Falling back to BLOB.\n`
-    );
-    db.run(createWithBlob);
-  }
-}
-
-function ensureFeedbackSchema(): void {
-  const columns = db.prepare("PRAGMA table_info(feedback)").all() as Array<{ name?: string }>;
-  const existing = new Set(
-    columns.map((col) => col.name).filter((name): name is string => Boolean(name))
-  );
-  const requiredColumns: Array<{ name: string; def: string }> = [
-    { name: "score", def: "REAL NOT NULL DEFAULT 0.5 CHECK (score >= 0 AND score <= 1)" },
-    { name: "source", def: "TEXT NOT NULL DEFAULT 'Agent' CHECK (source IN ('LSP', 'Agent', 'User'))" },
-    { name: "metadata", def: "TEXT" },
-    { name: "created_at", def: "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP" },
-  ];
-
-  for (const col of requiredColumns) {
-    if (!existing.has(col.name)) {
-      db.run(`ALTER TABLE feedback ADD COLUMN ${col.name} ${col.def}`);
-    }
-  }
-}
-
-function ensureUserMemorySchema(): void {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS user_memory (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      memory_key TEXT NOT NULL UNIQUE,
-      content TEXT NOT NULL,
-      tags TEXT,
-      embedding BLOB,
+    CREATE TABLE IF NOT EXISTS template_cache (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      source TEXT NOT NULL,
+      version TEXT NOT NULL,
+      intent_type TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      task_type TEXT NOT NULL,
+      tags TEXT NOT NULL,
+      seniority_level TEXT NOT NULL,
+      output_style TEXT NOT NULL,
+      instructions TEXT NOT NULL,
+      expected_output TEXT NOT NULL,
+      quality_score REAL NOT NULL DEFAULT 0.5 CHECK (quality_score >= 0 AND quality_score <= 1),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) STRICT;
   `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS template_stats (
+      template_id TEXT PRIMARY KEY,
+      selected_count INTEGER NOT NULL DEFAULT 0,
+      accepted_count INTEGER NOT NULL DEFAULT 0,
+      edited_count INTEGER NOT NULL DEFAULT 0,
+      regenerated_count INTEGER NOT NULL DEFAULT 0,
+      rejected_count INTEGER NOT NULL DEFAULT 0,
+      executed_count INTEGER NOT NULL DEFAULT 0,
+      last_used_at TEXT,
+      quality_score REAL NOT NULL DEFAULT 0.5 CHECK (quality_score >= 0 AND quality_score <= 1),
+      FOREIGN KEY(template_id) REFERENCES template_cache(id) ON DELETE CASCADE
+    ) STRICT;
+  `);
+
+  seedDefaultTemplates();
 }
 
-function ensureDedupeIndexes(): void {
-  db.run(`
-    DELETE FROM prompt_history
-    WHERE id NOT IN (
-      SELECT MAX(id)
-      FROM prompt_history
-      GROUP BY raw_prompt, refined_prompt
-    );
-  `);
-  db.run(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_history_dedupe
-    ON prompt_history(raw_prompt, refined_prompt);
-  `);
-
-  db.run(`
-    DELETE FROM feedback
-    WHERE id NOT IN (
-      SELECT MAX(id)
-      FROM feedback
-      GROUP BY prompt_id, score, source, ifnull(metadata, '')
-    );
-  `);
-  db.run(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_dedupe
-    ON feedback(prompt_id, score, source, ifnull(metadata, ''));
-  `);
-}
-
-export function savePrompt(raw: string, refined: string, embedding?: number[] | null): number {
+export function upsertTemplates(templates: TemplateRecord[]): void {
   const stmt = db.prepare(`
-    INSERT INTO prompt_history (raw_prompt, refined_prompt, embedding)
-    VALUES (?, ?, ?)
-    ON CONFLICT(raw_prompt, refined_prompt) DO UPDATE SET
-      embedding = excluded.embedding,
-      created_at = CURRENT_TIMESTAMP
-    RETURNING id
+    INSERT INTO template_cache (
+      id, name, description, source, version, intent_type, domain, task_type,
+      tags, seniority_level, output_style, instructions, expected_output, quality_score
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      description = excluded.description,
+      source = excluded.source,
+      version = excluded.version,
+      intent_type = excluded.intent_type,
+      domain = excluded.domain,
+      task_type = excluded.task_type,
+      tags = excluded.tags,
+      seniority_level = excluded.seniority_level,
+      output_style = excluded.output_style,
+      instructions = excluded.instructions,
+      expected_output = excluded.expected_output,
+      quality_score = excluded.quality_score,
+      updated_at = CURRENT_TIMESTAMP
   `);
 
-  const buffer =
-    Array.isArray(embedding) && embedding.length > 0
-      ? Buffer.from(new Float32Array(embedding).buffer)
-      : null;
-  const row = stmt.get(raw, refined, buffer) as { id: number } | undefined;
-  if (!row?.id) {
-    throw new Error("Failed to upsert prompt_history row.");
-  }
-  return row.id;
-}
-
-export function recordFeedback(
-  promptId: number,
-  score: number,
-  source: FeedbackSource,
-  metadata?: unknown
-): void {
-  const stmt = db.prepare(`
-    INSERT INTO feedback (prompt_id, score, source, metadata)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT DO UPDATE SET
-      metadata = excluded.metadata,
-      created_at = CURRENT_TIMESTAMP
+  const ensureStats = db.prepare(`
+    INSERT INTO template_stats (template_id, quality_score)
+    VALUES (?, ?)
+    ON CONFLICT(template_id) DO NOTHING
   `);
 
-  const metadataText = metadata === undefined ? null : JSON.stringify(metadata);
-  stmt.run(promptId, score, source, metadataText);
+  const tx = db.transaction((rows: TemplateRecord[]) => {
+    for (const row of rows) {
+      stmt.run(
+        row.id,
+        row.name,
+        row.description,
+        row.source,
+        row.version,
+        row.intent_type,
+        row.domain,
+        row.task_type,
+        row.tags,
+        row.seniority_level,
+        row.output_style,
+        row.instructions,
+        row.expected_output,
+        row.quality_score
+      );
+      ensureStats.run(row.id, row.quality_score);
+    }
+  });
+
+  tx(templates);
 }
 
-export function getRecentRefinements(limit = 3): PromptPair[] {
-  const safeLimit = Math.max(1, Math.min(limit, 20));
+export function listTemplates(): TemplateRecord[] {
   return db
     .prepare(
-      "SELECT raw_prompt, refined_prompt FROM prompt_history ORDER BY created_at DESC LIMIT ?"
+      `SELECT id, name, description, source, version, intent_type, domain, task_type,
+              tags, seniority_level, output_style, instructions, expected_output, quality_score,
+              created_at, updated_at
+       FROM template_cache
+       ORDER BY quality_score DESC, updated_at DESC`
     )
-    .all(safeLimit) as PromptPair[];
+    .all() as TemplateRecord[];
 }
 
-export function getContextualExamples(currentVector: number[]): string {
-  const similarityWeight = 0.8;
-  const feedbackWeight = 0.2;
-
-  const history = db
+export function getTemplateStats(templateId: string): TemplateStats {
+  const row = db
     .prepare(
-      `SELECT
-         p.id,
-         p.raw_prompt,
-         p.refined_prompt,
-         p.embedding,
-         COALESCE(AVG(f.score), 0.5) AS avg_score
-       FROM prompt_history p
-       LEFT JOIN feedback f ON f.prompt_id = p.id
-       GROUP BY p.id, p.raw_prompt, p.refined_prompt, p.embedding, p.created_at
-       ORDER BY p.created_at DESC
-       LIMIT 50`
+      `SELECT template_id, selected_count, accepted_count, edited_count, regenerated_count,
+              rejected_count, executed_count, last_used_at, quality_score
+       FROM template_stats
+       WHERE template_id = ?`
     )
-    .all() as PromptHistoryRow[];
+    .get(templateId) as TemplateStats | undefined;
 
-  const examples = history
-    .map((row): SimilarExample | null => {
-      if (!row?.embedding) return null;
-      const rowVector = decodeFloat32Vector(row.embedding);
-      if (!rowVector || rowVector.length !== currentVector.length) return null;
-      const similarity = dotProduct(currentVector, rowVector);
-      const blended_rank = similarity * similarityWeight + row.avg_score * feedbackWeight;
-      return { ...row, similarity, blended_rank };
-    })
-    .filter((ex): ex is SimilarExample => ex != null)
-    .sort((a, b) => b.blended_rank - a.blended_rank)
-    .slice(0, 3);
+  if (row) return row;
 
-  return examples
-    .map(
-      (ex) =>
-        `User: ${ex.raw_prompt}\nRefined: ${ex.refined_prompt}\nFeedbackScore: ${ex.avg_score.toFixed(2)}`
-    )
-    .join("\n\n");
+  db.prepare(
+    `INSERT INTO template_stats (template_id, quality_score)
+     VALUES (?, 0.5)
+     ON CONFLICT(template_id) DO NOTHING`
+  ).run(templateId);
+
+  return {
+    template_id: templateId,
+    selected_count: 0,
+    accepted_count: 0,
+    edited_count: 0,
+    regenerated_count: 0,
+    rejected_count: 0,
+    executed_count: 0,
+    last_used_at: null,
+    quality_score: 0.5,
+  };
 }
 
-function decodeFloat32Vector(bytes: Uint8Array | null): Float32Array | null {
-  if (!bytes || bytes.byteLength % 4 !== 0) return null;
-  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+export function recordTemplateEvent(templateId: string, event: TemplateStatsEvent): void {
+  const columnByEvent: Record<TemplateStatsEvent, string> = {
+    selected: "selected_count",
+    accepted: "accepted_count",
+    edited: "edited_count",
+    regenerated: "regenerated_count",
+    rejected: "rejected_count",
+    executed: "executed_count",
+  };
+  const column = columnByEvent[event];
+
+  db.prepare(
+    `INSERT INTO template_stats (template_id, ${column}, last_used_at, quality_score)
+     VALUES (?, 1, CURRENT_TIMESTAMP, 0.5)
+     ON CONFLICT(template_id) DO UPDATE SET
+       ${column} = ${column} + 1,
+       last_used_at = CURRENT_TIMESTAMP,
+       quality_score = min(1.0, max(0.0,
+         quality_score
+         + CASE
+             WHEN ? IN ('accepted', 'executed') THEN 0.03
+             WHEN ? IN ('edited', 'regenerated') THEN -0.01
+             WHEN ? = 'rejected' THEN -0.04
+             ELSE 0
+           END
+       ))`
+  ).run(templateId, event, event, event);
 }
 
-function dotProduct(a: number[], b: ArrayLike<number>): number {
-  if (a.length !== b.length) return 0;
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += a[i]! * b[i]!;
-  }
-  return sum;
+function seedDefaultTemplates(): void {
+  const existing = db.prepare("SELECT COUNT(*) AS count FROM template_cache").get() as
+    | { count: number }
+    | undefined;
+  if ((existing?.count ?? 0) > 0) return;
+  upsertTemplates(DEFAULT_TEMPLATES);
 }
+
+const DEFAULT_TEMPLATES: TemplateRecord[] = [
+  {
+    id: "prompts-chat.coding-change.v1",
+    name: "Coding Change Request",
+    description: "Turns a messy implementation request into scoped engineering instructions.",
+    source: "prompts.chat",
+    version: "1",
+    intent_type: "coding",
+    domain: "software",
+    task_type: "implementation",
+    tags: "code,build,fix,implement,repo,branch,typescript,javascript,bun,node",
+    seniority_level: "intermediate",
+    output_style: "concise implementation prompt",
+    instructions:
+      "Convert the user request into clear coding instructions. Preserve repo constraints, expected files, validation commands, and delivery requirements. Avoid adding unrelated scope.",
+    expected_output:
+      "A compact execution-ready coding prompt with objective, constraints, validation, and expected result.",
+    quality_score: 0.75,
+  },
+  {
+    id: "prompts-chat.code-review.v1",
+    name: "Code Review",
+    description: "Turns a review request into a findings-first code review prompt.",
+    source: "prompts.chat",
+    version: "1",
+    intent_type: "coding",
+    domain: "software",
+    task_type: "review",
+    tags: "review,bug,risk,regression,test,security,performance",
+    seniority_level: "advanced",
+    output_style: "findings first",
+    instructions:
+      "Ask the host agent to review for correctness, regressions, security, missing tests, and maintainability. Findings must be grounded in file and line references when available.",
+    expected_output:
+      "Ordered findings, open questions, and a short summary only after issues.",
+    quality_score: 0.72,
+  },
+  {
+    id: "prompts-chat.architecture.v1",
+    name: "Architecture Decision",
+    description: "Turns a vague product/system direction into a pragmatic architecture prompt.",
+    source: "prompts.chat",
+    version: "1",
+    intent_type: "planning",
+    domain: "architecture",
+    task_type: "architecture",
+    tags: "architecture,system,stack,database,mcp,deploy,cloud,local,scale",
+    seniority_level: "intermediate",
+    output_style: "architecture decision record",
+    instructions:
+      "Frame the request as an architecture decision. Prefer boring reversible choices, state system boundaries, data model direction, operational cost, risks, and rejected alternatives.",
+    expected_output:
+      "A practical architecture recommendation with tradeoffs and next steps.",
+    quality_score: 0.78,
+  },
+  {
+    id: "prompts-chat.writing.v1",
+    name: "Clear Writing",
+    description: "Turns messy writing intent into a concise drafting or editing prompt.",
+    source: "prompts.chat",
+    version: "1",
+    intent_type: "writing",
+    domain: "communication",
+    task_type: "drafting",
+    tags: "write,explain,email,summary,docs,copy,paragraph,sentence",
+    seniority_level: "beginner",
+    output_style: "plain language",
+    instructions:
+      "Clarify the audience, desired tone, and output length. Ask the host agent to produce direct, readable writing without filler.",
+    expected_output:
+      "A clean writing prompt with audience, tone, format, and length constraints.",
+    quality_score: 0.7,
+  },
+  {
+    id: "prompts-chat.research.v1",
+    name: "Research Task",
+    description: "Turns a messy research request into a source-aware research prompt.",
+    source: "prompts.chat",
+    version: "1",
+    intent_type: "research",
+    domain: "general",
+    task_type: "research",
+    tags: "research,compare,latest,source,citation,verify,find",
+    seniority_level: "intermediate",
+    output_style: "sourced answer",
+    instructions:
+      "Clarify the question, required freshness, acceptable sources, and output format. Require source attribution when facts may have changed.",
+    expected_output:
+      "A research prompt with scope, source requirements, and answer format.",
+    quality_score: 0.68,
+  },
+];

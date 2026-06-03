@@ -8,7 +8,7 @@
         "TRANSFORMERS_BACKEND": "wasm",
         "OMP_NUM_THREADS": "1",
         "ORT_NUM_THREADS": "1",
-        "PROMPTIT_DB_PATH": "/YOUR/ABSOLUTE/PATH/data/memory.db"
+        "PROMPTIT_DB_PATH": "/YOUR/ABSOLUTE/PATH/data/promptit.db"
       }
     }
   }

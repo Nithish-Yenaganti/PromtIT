@@ -5,7 +5,6 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { initDatabase } from "./database";
-import { startEmbeddingWarmup } from "./embeddings";
 import { getPromptItToolDefinitions, handlePromptItToolCall } from "./refiner";
 
 initDatabase();
@@ -30,7 +29,6 @@ export async function startPromptItStdioServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await promptItServer.connect(transport);
   stdioStarted = true;
-  startEmbeddingWarmup();
   process.stderr.write("MCP prompt-refiner server connected (stdio).\n");
 }
 

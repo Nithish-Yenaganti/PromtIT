@@ -1,43 +1,21 @@
 import {
   DEFAULT_CHARS_PER_TOKEN,
   EXECUTION_TOKEN_TTL_MS,
-  MAX_METADATA_CHARS,
   MAX_TEXT_CHARS,
   parsePositiveNumberEnv,
 } from "./config";
-import {
-  getContextualExamples,
-  getRecentRefinements,
-  recordFeedback,
-  savePrompt,
-  type FeedbackSource,
-} from "./database";
-import { getEmbedding } from "./embeddings";
-
-type StoreArgs = {
-  rawText: string;
-  refinedText: string;
-  taskId: string;
-  executionToken: string;
-};
+import { recordTemplateStat, selectBestTemplate, type TemplateMatch } from "./templates";
 
 type PromptItArgs = {
   messyText: string;
   strict: boolean;
 };
 
-type FeedbackArgs = {
-  promptId: number;
-  score: number;
-  source: FeedbackSource;
-  taskId: string;
-  executionToken: string;
-  metadata?: unknown;
-};
-
 type NormalizeArgs = {
   messyText: string;
   convertedPrompt?: string;
+  taskId?: string;
+  executionToken?: string;
   strict: boolean;
 };
 
@@ -62,9 +40,11 @@ type RefinementSession = {
   expiresAtMs: number;
   storeDone: boolean;
   feedbackDone: boolean;
-  promptId?: number;
   rawText?: string;
   currentPrompt?: string;
+  templateId?: string;
+  templateName?: string;
+  templateMatch?: TemplateMatch;
   revisionCount: number;
   committed: boolean;
 };
@@ -82,7 +62,7 @@ export function getPromptItToolDefinitions() {
     {
       name: "prompt_it",
       description:
-        "Legacy entrypoint: takes messy text, recalls similar refinements, and returns a host-ready conversion payload.",
+        "Legacy entrypoint: takes messy text, selects a prompts.chat-style template, and returns a host-ready conversion payload.",
       inputSchema: {
         type: "object",
         properties: {
@@ -102,7 +82,7 @@ export function getPromptItToolDefinitions() {
     {
       name: "normalize_prompt",
       description:
-        "Starts a tool-only PromptIT review session. Returns structured review data, conversion context, and edit/regenerate/send actions for the host UI.",
+        "Starts or updates a tool-only PromptIT review session. Selects a template and returns host-LLM refinement context plus edit/regenerate/send actions.",
       inputSchema: {
         type: "object",
         properties: {
@@ -114,6 +94,16 @@ export function getPromptItToolDefinitions() {
             type: "string",
             description:
               "Optional host-generated clean prompt. When present, the session is ready for user review.",
+          },
+          task_id: {
+            type: "string",
+            description:
+              "Optional existing review task id. Use with execution_token when returning a host-generated converted_prompt.",
+          },
+          execution_token: {
+            type: "string",
+            description:
+              "Optional existing execution token. Use with task_id when returning a host-generated converted_prompt.",
           },
           strict: {
             type: "boolean",
@@ -152,7 +142,7 @@ export function getPromptItToolDefinitions() {
     {
       name: "commit_prompt",
       description:
-        "Approves the current PromptIT review draft, stores it in memory, records feedback, and returns the final prompt for the host to send.",
+        "Approves the current PromptIT review draft, records aggregate template stats, and returns the final prompt for the host to send.",
       inputSchema: {
         type: "object",
         properties: {
@@ -179,61 +169,6 @@ export function getPromptItToolDefinitions() {
         required: ["task_id", "execution_token"],
       },
     },
-    {
-      name: "store_refinement",
-      description:
-        "Legacy storage tool: stores a pre-refined prompt pair and embedding in local SQLite memory.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          raw_text: { type: "string", description: "The original messy user text." },
-          refined_text: {
-            type: "string",
-            description:
-              "The structured prompt produced by the host agent and ready for execution.",
-          },
-          task_id: { type: "string", description: "Task id returned by prompt_it." },
-          execution_token: {
-            type: "string",
-            description: "Execution token returned by prompt_it.",
-          },
-        },
-        required: ["raw_text", "refined_text", "task_id", "execution_token"],
-      },
-    },
-    {
-      name: "record_feedback",
-      description:
-        "Legacy feedback tool: records quality feedback for a stored refinement to improve memory relevance.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          prompt_id: {
-            type: "string",
-            description: "Links back to the original SQLite prompt_history entry (as string id).",
-          },
-          score: {
-            type: "number",
-            description: "Float from 0 to 1 (0=failure, 0.5=needed tweaks, 1=perfect).",
-          },
-          source: {
-            type: "string",
-            enum: ["LSP", "Agent", "User"],
-            description: "Feedback source.",
-          },
-          metadata: {
-            type: "object",
-            description: "JSON metadata such as error message or missing piece.",
-          },
-          task_id: { type: "string", description: "Task id returned by prompt_it." },
-          execution_token: {
-            type: "string",
-            description: "Execution token returned by prompt_it.",
-          },
-        },
-        required: ["prompt_id", "score", "source", "task_id", "execution_token"],
-      },
-    },
   ];
 }
 
@@ -242,16 +177,12 @@ export async function handlePromptItToolCall(name: string, args: unknown) {
   if (name === "normalize_prompt") return handleNormalizePrompt(args);
   if (name === "regenerate_prompt") return handleRegeneratePrompt(args);
   if (name === "commit_prompt") return handleCommitPrompt(args);
-  if (name === "store_refinement") return handleStoreRefinement(args);
-  if (name === "record_feedback") return handleRecordFeedback(args);
   throw new Error("Tool not found");
 }
 
-async function handleLegacyPromptIt(input: unknown) {
+function handleLegacyPromptIt(input: unknown) {
   const { messyText, strict } = parsePromptItArgs(input);
-  const { recallNotice, sensitiveNotice, conversionInput } = await buildConversionContext(
-    messyText
-  );
+  const { sensitiveNotice, conversionInput } = buildConversionContext(messyText);
   const session = createSession();
   const strictMeta = strict
     ? [
@@ -260,28 +191,36 @@ async function handleLegacyPromptIt(input: unknown) {
         `TASK_ID: ${session.taskId}`,
         `EXECUTION_TOKEN: ${session.executionToken}`,
         `TOKEN_TTL_SECONDS: ${Math.floor(EXECUTION_TOKEN_TTL_MS / 1000)}`,
-        "REQUIRED_STEPS: store_refinement -> record_feedback",
+        "REQUIRED_STEPS: normalize_prompt -> commit_prompt",
       ].join("\n")
     : "";
 
   return textToolResult(
-    `${recallNotice ? `${recallNotice}\n\n` : ""}${
-      sensitiveNotice ? `${sensitiveNotice}\n\n` : ""
-    }${conversionInput}${strictMeta}`
+    `${sensitiveNotice ? `${sensitiveNotice}\n\n` : ""}${conversionInput}${strictMeta}`
   );
 }
 
-async function handleNormalizePrompt(input: unknown) {
-  const { messyText, convertedPrompt, strict } = parseNormalizeArgs(input);
-  const { recallNotice, sensitiveNotice, conversionInput, examplesBlock } =
-    await buildConversionContext(messyText);
-  const session = createSession();
+function handleNormalizePrompt(input: unknown) {
+  const { messyText, convertedPrompt, taskId, executionToken, strict } =
+    parseNormalizeArgs(input);
+  const existingSession =
+    taskId && executionToken ? validateSession(taskId, executionToken) : undefined;
+  const session = existingSession ?? createSession();
+  const { sensitiveNotice, conversionInput, templateMatch } = buildConversionContext(
+    messyText,
+    existingSession?.templateMatch
+  );
   const sanitizedRaw = redactSensitiveText(messyText);
   const sanitizedConverted =
     convertedPrompt === undefined ? undefined : redactSensitiveText(convertedPrompt);
   session.rawText = sanitizedRaw.text;
   session.currentPrompt = sanitizedConverted?.text;
-  session.revisionCount = convertedPrompt ? 1 : 0;
+  session.templateId = templateMatch.template.id;
+  session.templateName = templateMatch.template.name;
+  session.templateMatch = templateMatch;
+  session.revisionCount = convertedPrompt
+    ? Math.max(1, existingSession ? session.revisionCount + 1 : 1)
+    : session.revisionCount;
 
   return jsonToolResult(
     buildReviewPayload({
@@ -290,10 +229,9 @@ async function handleNormalizePrompt(input: unknown) {
       convertedPrompt: sanitizedConverted?.text,
       status: convertedPrompt ? "ready_for_review" : "needs_host_refinement",
       conversionInput,
-      similarRefinements: examplesBlock,
+      templateMatch,
       notices: [
         strict ? "" : "strict=false was accepted, but review sessions still require task credentials.",
-        recallNotice,
         sensitiveNotice,
         sanitizedConverted?.redacted
           ? "Potential secrets were redacted from converted_prompt."
@@ -315,12 +253,18 @@ function handleRegeneratePrompt(input: unknown) {
   if (session.committed) {
     fail("ERR_FLOW_INVALID", "This prompt review session has already been committed.");
   }
+  if (!session.templateId) {
+    fail("ERR_FLOW_INVALID", "No selected template is attached to this review session.");
+  }
 
   const sanitizedConverted =
     convertedPrompt === undefined ? undefined : redactSensitiveText(convertedPrompt);
   if (sanitizedConverted) {
     session.currentPrompt = sanitizedConverted.text;
     session.revisionCount += 1;
+    recordTemplateStat(session.templateId, "regenerated");
+  } else {
+    recordTemplateStat(session.templateId, "regenerated");
   }
 
   const regenerationInstruction = [
@@ -331,6 +275,9 @@ function handleRegeneratePrompt(input: unknown) {
     "",
     "CURRENT_CONVERTED_PROMPT:",
     session.currentPrompt ?? "No converted prompt has been accepted into the session yet.",
+    "",
+    "SELECTED_TEMPLATE:",
+    `${session.templateName ?? session.templateId}`,
     "",
     "USER_FEEDBACK:",
     userFeedback ?? "No specific feedback provided. Produce a clearer alternative.",
@@ -345,6 +292,7 @@ function handleRegeneratePrompt(input: unknown) {
       convertedPrompt: session.currentPrompt,
       status: sanitizedConverted ? "ready_for_review" : "needs_regenerated_prompt",
       regenerationInstruction,
+      templateMatch: session.templateMatch,
       notices: [
         sanitizedConverted?.redacted
           ? "Potential secrets were redacted from converted_prompt."
@@ -354,7 +302,7 @@ function handleRegeneratePrompt(input: unknown) {
   );
 }
 
-async function handleCommitPrompt(input: unknown) {
+function handleCommitPrompt(input: unknown) {
   const { taskId, executionToken, finalPrompt, destination, score } = parseCommitArgs(input);
   const session = validateSession(taskId, executionToken);
   if (!session.rawText) {
@@ -374,20 +322,19 @@ async function handleCommitPrompt(input: unknown) {
       "No converted prompt is available. Provide final_prompt or regenerate a converted_prompt first."
     );
   }
+  if (!session.templateId) {
+    fail("ERR_FLOW_INVALID", "No selected template is attached to this review session.");
+  }
 
   const sanitizedFinal = redactSensitiveText(promptToCommit);
   const notices: string[] = [];
-  const embedding = await getEmbeddingOrNull(session.rawText, "commit_prompt", notices);
-  const promptId = savePrompt(session.rawText, sanitizedFinal.text, embedding);
   const tokenReport = buildTokenDiffReport(session.rawText, sanitizedFinal.text);
-  recordFeedback(promptId, score, "User", {
-    source: "commit_prompt",
-    destination: destination ?? "host",
-    revision_count: session.revisionCount,
-  });
+  const wasEdited = session.currentPrompt !== undefined && sanitizedFinal.text !== session.currentPrompt;
+  recordTemplateStat(session.templateId, "accepted");
+  recordTemplateStat(session.templateId, "executed");
+  if (wasEdited) recordTemplateStat(session.templateId, "edited");
 
   session.currentPrompt = sanitizedFinal.text;
-  session.promptId = promptId;
   session.storeDone = true;
   session.feedbackDone = true;
   session.committed = true;
@@ -404,8 +351,8 @@ async function handleCommitPrompt(input: unknown) {
       convertedPrompt: sanitizedFinal.text,
       status: "committed",
       destination: destination ?? "host",
-      promptId,
       tokenReport,
+      templateMatch: session.templateMatch,
       notices,
     }),
     final_prompt: sanitizedFinal.text,
@@ -414,123 +361,45 @@ async function handleCommitPrompt(input: unknown) {
   });
 }
 
-async function handleStoreRefinement(input: unknown) {
-  const { rawText, refinedText, taskId, executionToken } = parseStoreArgs(input);
-  const session = validateSession(taskId, executionToken);
-  if (session.storeDone) {
-    fail("ERR_FLOW_INVALID", "store_refinement has already been completed for this task.");
-  }
-
-  const sanitizedRaw = redactSensitiveText(rawText);
-  const sanitizedRefined = redactSensitiveText(refinedText);
-  const notices: string[] = [];
-  const embedding = await getEmbeddingOrNull(
-    sanitizedRaw.text,
-    "store_refinement",
-    notices
-  );
-  const promptId = savePrompt(sanitizedRaw.text, sanitizedRefined.text, embedding);
-  const tokenDiffReport = buildTokenDiffReport(rawText, refinedText);
-
-  if (sanitizedRaw.redacted || sanitizedRefined.redacted) {
-    notices.push("Potential secrets were redacted before persistence and embedding generation.");
-  }
-
-  session.storeDone = true;
-  session.promptId = promptId;
-
-  const noticeText =
-    notices.length > 0 ? `\n${notices.map((notice) => `Note: ${notice}`).join("\n")}` : "";
-
-  return textToolResult(
-    `Stored refinement successfully.\nPROMPT_ID: ${promptId}\n\n${tokenDiffReport}${noticeText}`
-  );
-}
-
-function handleRecordFeedback(input: unknown) {
-  try {
-    const { promptId, score, source, metadata, taskId, executionToken } =
-      parseFeedbackArgs(input);
-    const session = validateSession(taskId, executionToken);
-    if (!session.storeDone) {
-      fail("ERR_FLOW_INVALID", "store_refinement must be completed before record_feedback.");
-    }
-    if (session.feedbackDone) {
-      fail("ERR_FLOW_INVALID", "record_feedback has already been completed for this task.");
-    }
-    if (session.promptId && session.promptId !== promptId) {
-      fail(
-        "ERR_FLOW_INVALID",
-        "prompt_id mismatch for this task. Use the prompt_id returned by store_refinement."
-      );
-    }
-
-    const sanitizedMetadata = sanitizeMetadataForStorage(metadata);
-    recordFeedback(promptId, score, source, sanitizedMetadata.metadata);
-    session.feedbackDone = true;
-    refinementSessions.delete(taskId);
-    const metadataNotice =
-      sanitizedMetadata.redacted || sanitizedMetadata.truncated
-        ? " Metadata was sanitized before storage."
-        : "";
-
-    return textToolResult(`Feedback recorded. Prompt memory is updated. Task closed.${metadataNotice}`);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`record_feedback failed: ${message}\n`);
-    return {
-      content: [{ type: "text", text: "Unable to record feedback right now." }],
-      isError: true,
-    };
-  }
-}
-
-async function buildConversionContext(messyText: string): Promise<{
-  examplesBlock: string;
-  recallNotice: string;
+function buildConversionContext(messyText: string, existingMatch?: TemplateMatch): {
   sensitiveNotice: string;
   conversionInput: string;
-}> {
+  templateMatch: TemplateMatch;
+} {
   const sanitizedMessy = redactSensitiveText(messyText);
-  let examplesText = "";
-  let recallNotice = "";
-  try {
-    const queryEmbedding = await getEmbedding(sanitizedMessy.text);
-    examplesText = getContextualExamples(queryEmbedding);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`prompt_it recall path failed: ${message}\n`);
-    const recent = getRecentRefinements(3);
-    examplesText =
-      recent.length > 0
-        ? recent.map((x) => `User: ${x.raw_prompt}\nRefined: ${x.refined_prompt}`).join("\n\n")
-        : "No relevant refinement history found yet.";
-    recallNotice =
-      "Notice: embedding recall is unavailable, so recent refinements were used instead.";
-  }
-
-  const examplesBlock = examplesText || "No relevant refinement history found yet.";
-  const sanitizedExamples = redactSensitiveText(examplesBlock);
-  const sensitiveNotice =
-    sanitizedMessy.redacted || sanitizedExamples.redacted
-      ? "Notice: potential secrets were redacted before host-side refinement."
-      : "";
+  const templateMatch = existingMatch ?? selectBestTemplate(sanitizedMessy.text);
+  const sensitiveNotice = sanitizedMessy.redacted
+    ? "Notice: potential secrets were redacted before host-side refinement."
+    : "";
   const conversionInput = [
     "MESSY_TEXT:",
     sanitizedMessy.text,
     "",
-    "SIMILAR_REFINEMENTS:",
-    sanitizedExamples.text,
+    "SELECTED_TEMPLATE:",
+    `id: ${templateMatch.template.id}`,
+    `name: ${templateMatch.template.name}`,
+    `source: ${templateMatch.template.source}`,
+    `intent_type: ${templateMatch.template.intent_type}`,
+    `domain: ${templateMatch.template.domain}`,
+    `task_type: ${templateMatch.template.task_type}`,
+    `seniority_level: ${templateMatch.template.seniority_level}`,
+    `output_style: ${templateMatch.template.output_style}`,
+    `tags: ${templateMatch.template.tags}`,
+    "",
+    "TEMPLATE_INSTRUCTIONS:",
+    templateMatch.template.instructions,
+    "",
+    "EXPECTED_OUTPUT:",
+    templateMatch.template.expected_output,
     "",
     "HOST_TASK:",
-    "Rewrite MESSY_TEXT into a clean, structured system prompt. Infer intent type and user seniority from the text, and adapt prompt depth/terminology accordingly. Return only the refined prompt text. Do not include schema/section headers unless explicitly requested. Do not run web search or any external tools before completing this refinement step.",
+    "Use SELECTED_TEMPLATE to rewrite MESSY_TEXT into a clean, structured prompt. Return only the refined prompt text. Do not execute the user's task. Do not add unrelated requirements.",
   ].join("\n");
 
   return {
-    examplesBlock: sanitizedExamples.text,
-    recallNotice,
     sensitiveNotice,
     conversionInput,
+    templateMatch,
   };
 }
 
@@ -540,11 +409,10 @@ function buildReviewPayload(args: {
   convertedPrompt?: string;
   status: ReviewStatus;
   conversionInput?: string;
-  similarRefinements?: string;
+  templateMatch?: TemplateMatch;
   notices?: string[];
   regenerationInstruction?: string;
   destination?: string;
-  promptId?: number;
   tokenReport?: string;
 }) {
   const actions =
@@ -584,37 +452,31 @@ function buildReviewPayload(args: {
       regenerate: "regenerate_prompt",
       send: "commit_prompt",
     },
+    selected_template: args.templateMatch
+      ? {
+          id: args.templateMatch.template.id,
+          name: args.templateMatch.template.name,
+          source: args.templateMatch.template.source,
+          intent_type: args.templateMatch.template.intent_type,
+          domain: args.templateMatch.template.domain,
+          task_type: args.templateMatch.template.task_type,
+          score: Number(args.templateMatch.score.toFixed(4)),
+          reasons: args.templateMatch.reasons,
+        }
+      : undefined,
     conversion_context: args.conversionInput
       ? {
           payload: args.conversionInput,
-          similar_refinements: args.similarRefinements ?? "",
+          selected_template: args.templateMatch?.template ?? null,
           note:
-            "Host agent should produce converted_prompt from this payload, then call normalize_prompt again with the same messy_text and converted_prompt or call regenerate_prompt with converted_prompt.",
+            "Host LLM should produce converted_prompt from this payload, then call normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.",
         }
       : undefined,
     regeneration_instruction: args.regenerationInstruction,
     destination: args.destination,
-    prompt_id: args.promptId,
     token_report: args.tokenReport,
     notices: args.notices?.filter(Boolean) ?? [],
   };
-}
-
-async function getEmbeddingOrNull(
-  text: string,
-  operation: string,
-  notices: string[]
-): Promise<number[] | null> {
-  try {
-    return await getEmbedding(text);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`Embedding failed during ${operation}: ${message}\n`);
-    notices.push(
-      "Saved without embedding due to runtime issue. Semantic recall may be limited until embeddings recover."
-    );
-    return null;
-  }
 }
 
 function redactSensitiveText(input: string): { text: string; redacted: boolean } {
@@ -634,37 +496,6 @@ function redactSensitiveText(input: string): { text: string; redacted: boolean }
     output = output.replace(pattern, replacement);
   }
   return { text: output, redacted: output !== input };
-}
-
-function sanitizeMetadataForStorage(input: unknown): {
-  metadata: unknown;
-  redacted: boolean;
-  truncated: boolean;
-} {
-  if (input === undefined) {
-    return { metadata: undefined, redacted: false, truncated: false };
-  }
-
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(input);
-  } catch {
-    serialized = String(input);
-  }
-
-  const redactedResult = redactSensitiveText(serialized);
-  let safeText = redactedResult.text;
-  let truncated = false;
-  if (safeText.length > MAX_METADATA_CHARS) {
-    safeText = `${safeText.slice(0, MAX_METADATA_CHARS)}...[TRUNCATED]`;
-    truncated = true;
-  }
-
-  return {
-    metadata: { sanitized: true, payload: safeText },
-    redacted: redactedResult.redacted,
-    truncated,
-  };
 }
 
 function pruneExpiredSessions(): void {
@@ -713,29 +544,6 @@ function validateSession(taskIdRaw: string, tokenRaw: string): RefinementSession
   return session;
 }
 
-function parseStoreArgs(input: unknown): StoreArgs {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const rawText = args.raw_text;
-  const refinedText = args.refined_text;
-  const taskIdRaw = args.task_id;
-  const executionTokenRaw = args.execution_token;
-
-  assertString(rawText, "raw_text");
-  assertString(refinedText, "refined_text");
-  assertString(taskIdRaw, "task_id");
-  assertString(executionTokenRaw, "execution_token");
-  if (rawText.length > MAX_TEXT_CHARS || refinedText.length > MAX_TEXT_CHARS) {
-    throw new Error(`raw_text/refined_text cannot exceed ${MAX_TEXT_CHARS} characters.`);
-  }
-
-  return {
-    rawText,
-    refinedText,
-    taskId: taskIdRaw,
-    executionToken: executionTokenRaw,
-  };
-}
-
 function parsePromptItArgs(input: unknown): PromptItArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const messyTextRaw = args.messy_text;
@@ -756,10 +564,17 @@ function parseNormalizeArgs(input: unknown): NormalizeArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const messyTextRaw = args.messy_text;
   const convertedPromptRaw = args.converted_prompt;
+  const taskIdRaw = args.task_id;
+  const executionTokenRaw = args.execution_token;
   const strictRaw = args.strict;
 
   assertString(messyTextRaw, "messy_text");
   assertOptionalString(convertedPromptRaw, "converted_prompt");
+  assertOptionalString(taskIdRaw, "task_id");
+  assertOptionalString(executionTokenRaw, "execution_token");
+  if ((taskIdRaw && !executionTokenRaw) || (!taskIdRaw && executionTokenRaw)) {
+    throw new Error("task_id and execution_token must be provided together.");
+  }
   if (messyTextRaw.length > MAX_TEXT_CHARS) {
     throw new Error(`messy_text cannot exceed ${MAX_TEXT_CHARS} characters.`);
   }
@@ -773,6 +588,8 @@ function parseNormalizeArgs(input: unknown): NormalizeArgs {
   return {
     messyText: messyTextRaw,
     convertedPrompt: typeof convertedPromptRaw === "string" ? convertedPromptRaw : undefined,
+    taskId: typeof taskIdRaw === "string" ? taskIdRaw : undefined,
+    executionToken: typeof executionTokenRaw === "string" ? executionTokenRaw : undefined,
     strict: strictRaw ?? true,
   };
 }
@@ -832,41 +649,6 @@ function parseCommitArgs(input: unknown): CommitArgs {
     finalPrompt: typeof finalPromptRaw === "string" ? finalPromptRaw : undefined,
     destination: typeof destinationRaw === "string" ? destinationRaw : undefined,
     score,
-  };
-}
-
-function parseFeedbackArgs(input: unknown): FeedbackArgs {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const promptIdRaw = args.prompt_id;
-  const scoreRaw = args.score;
-  const sourceRaw = args.source;
-  const taskIdRaw = args.task_id;
-  const executionTokenRaw = args.execution_token;
-
-  assertString(promptIdRaw, "prompt_id");
-  const parsedPromptId = Number(promptIdRaw);
-  if (!Number.isInteger(parsedPromptId) || parsedPromptId <= 0) {
-    throw new Error("prompt_id must be a string containing a positive integer.");
-  }
-  if (typeof scoreRaw !== "number" || !Number.isFinite(scoreRaw)) {
-    throw new Error("score must be a number between 0 and 1.");
-  }
-  if (scoreRaw < 0 || scoreRaw > 1) {
-    throw new Error("score must be between 0 and 1.");
-  }
-  if (sourceRaw !== "LSP" && sourceRaw !== "Agent" && sourceRaw !== "User") {
-    throw new Error("source must be one of: LSP, Agent, User.");
-  }
-  assertString(taskIdRaw, "task_id");
-  assertString(executionTokenRaw, "execution_token");
-
-  return {
-    promptId: parsedPromptId,
-    score: scoreRaw,
-    source: sourceRaw,
-    taskId: taskIdRaw,
-    executionToken: executionTokenRaw,
-    metadata: args.metadata,
   };
 }
 

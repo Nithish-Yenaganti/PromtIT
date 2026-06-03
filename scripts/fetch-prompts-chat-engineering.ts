@@ -32,7 +32,7 @@ function isEngineeringPrompt(prompt: PromptItem, keywords: string[]): boolean {
   return keywords.some((kw) => haystack.includes(kw));
 }
 
-function buildHeaders(): HeadersInit | undefined {
+function buildHeaders(): Record<string, string> | undefined {
   const bearer = process.env.PROMPTS_CHAT_BEARER_TOKEN?.trim() || process.env.PROMPTS_CHAT_API_KEY?.trim();
   if (!bearer) return undefined;
   return { Authorization: `Bearer ${bearer}` };
@@ -62,7 +62,7 @@ async function main() {
 
     // Pull all pages from prompts/list.
     do {
-      const listResult = await client.request(
+      const listResult: { prompts: PromptItem[]; nextCursor?: string } = await client.request(
         { method: "prompts/list", params: cursor ? { cursor } : {} },
         ListPromptsResultSchema
       );
