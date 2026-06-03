@@ -8,8 +8,13 @@ if (existsSync(testDbPath)) unlinkSync(testDbPath);
 process.env.PROMPTIT_DB_PATH = testDbPath;
 
 const { initDatabase } = await import("../src/database");
-const { normalizePromptToTemplate, normalizeSearchPromptToTemplate, validateTemplateRecord } =
-  await import("../src/promptsChatSync");
+const {
+  normalizePromptToTemplate,
+  normalizeSearchPromptToTemplate,
+  resolvePromptsChatMcpUrl,
+  validateTemplateRecord,
+} = await import("../src/promptsChatSync");
+const { handlePromptItToolCall } = await import("../src/refiner");
 const { selectBestTemplate } = await import("../src/templates");
 
 initDatabase();
@@ -60,6 +65,38 @@ test("normalizes search_prompts results without storing full prompt content", ()
   expect(template.instructions).toContain("A prompt for conducting thorough code reviews.");
   expect(template.instructions).not.toContain("This is a long prompt body");
   expect(validateTemplateRecord(template)).toEqual([]);
+});
+
+test("allows only default or explicitly allowlisted prompts.chat MCP URLs", () => {
+  expect(resolvePromptsChatMcpUrl("https://prompts.chat/api/mcp")).toBe(
+    "https://prompts.chat/api/mcp"
+  );
+  expect(() => resolvePromptsChatMcpUrl("http://prompts.chat/api/mcp")).toThrow(
+    "must use https"
+  );
+  expect(() => resolvePromptsChatMcpUrl("https://example.com/api/mcp")).toThrow(
+    "not allowed"
+  );
+
+  process.env.PROMPTIT_ALLOWED_MCP_ORIGINS = "https://example.com";
+  expect(resolvePromptsChatMcpUrl("https://example.com/api/mcp")).toBe(
+    "https://example.com/api/mcp"
+  );
+  delete process.env.PROMPTIT_ALLOWED_MCP_ORIGINS;
+});
+
+test("redacts generic secret assignments from review payloads", async () => {
+  const result = await handlePromptItToolCall("normalize_prompt", {
+    messy_text: "fix the api client with PROMPTS_API_KEY=super-secret-value-12345",
+  });
+  const textResult = result.content[0];
+  expect(textResult).toBeDefined();
+  if (!textResult || textResult.type !== "text") throw new Error("Expected text tool result.");
+  const payload = JSON.parse(textResult.text);
+
+  expect(payload.original_prompt).toContain("PROMPTS_API_KEY=[REDACTED_SECRET]");
+  expect(payload.original_prompt).not.toContain("super-secret-value-12345");
+  expect(payload.conversion_context.payload).toContain("PROMPTS_API_KEY=[REDACTED_SECRET]");
 });
 
 test("validates required template fields and quality score", () => {

@@ -469,14 +469,22 @@ function buildReviewPayload(args: {
 function redactSensitiveText(input: string): { text: string; redacted: boolean } {
   let output = input;
   const patterns: Array<[RegExp, string]> = [
+    [/\bsk-proj-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_OPENAI_PROJECT_KEY]"],
     [/\bsk-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_API_KEY]"],
     [/\bghp_[A-Za-z0-9]{20,}\b/g, "[REDACTED_TOKEN]"],
+    [/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[REDACTED_GITHUB_TOKEN]"],
     [/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED_AWS_ACCESS_KEY]"],
+    [/\bAIza[0-9A-Za-z_-]{30,}\b/g, "[REDACTED_GOOGLE_API_KEY]"],
+    [/\bxox[baprs]-[A-Za-z0-9-]{20,}\b/g, "[REDACTED_SLACK_TOKEN]"],
     [
       /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
       "[REDACTED_PRIVATE_KEY]",
     ],
     [/\bBearer\s+[A-Za-z0-9._~+\/-]{16,}\b/g, "Bearer [REDACTED_TOKEN]"],
+    [
+      /\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*)\s*=\s*["']?[^"'\s]{8,}["']?/gi,
+      "$1=[REDACTED_SECRET]",
+    ],
   ];
 
   for (const [pattern, replacement] of patterns) {

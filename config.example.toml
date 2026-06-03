@@ -12,6 +12,8 @@ PROMPTIT_DB_PATH = "/YOUR/ABSOLUTE/PATH/data/promptit.db"
 # Optional prompts.chat sync config:
 # PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp"
 # PROMPTS_API_KEY = "YOUR_PROMPTS_CHAT_API_KEY"
+# PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS = "https://prompts.chat/api/mcp"
+# PROMPTIT_ALLOWED_MCP_ORIGINS = "https://prompts.chat"
 
 [agents.prompt_engineer]
 description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."

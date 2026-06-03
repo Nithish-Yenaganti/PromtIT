@@ -151,6 +151,8 @@ PromptIT must not call prompts.chat `improve_prompt`. prompts.chat is used for t
 
 PromptIT should not aggressively mirror all prompts.chat prompts. It uses targeted search queries, stores derived routing/refinement metadata, and keeps full prompt refinement work inside the host LLM.
 
+For security, custom `server_url` values are rejected unless they use HTTPS and match `https://prompts.chat/api/mcp`, `PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS`, or `PROMPTIT_ALLOWED_MCP_ORIGINS`.
+
 ```json
 {
   "keywords": ["engineering", "review", "architecture"],

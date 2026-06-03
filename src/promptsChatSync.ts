@@ -9,6 +9,8 @@ import {
 import { upsertTemplates, type TemplateRecord } from "./database";
 
 const DEFAULT_PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp";
+const ALLOWED_MCP_URL_ENV = "PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS";
+const ALLOWED_MCP_ORIGIN_ENV = "PROMPTIT_ALLOWED_MCP_ORIGINS";
 
 export type PromptsChatPromptItem = {
   name: string;
@@ -211,10 +213,11 @@ const INTENT_CONFIGS: IntentConfig[] = [
 export async function syncPromptsChatTemplates(
   options: SyncPromptsChatOptions = {}
 ): Promise<SyncPromptsChatResult> {
-  const serverUrl =
+  const serverUrl = resolvePromptsChatMcpUrl(
     options.serverUrl?.trim() ||
     process.env.PROMPTS_CHAT_MCP_URL?.trim() ||
-    DEFAULT_PROMPTS_CHAT_MCP_URL;
+    DEFAULT_PROMPTS_CHAT_MCP_URL
+  );
 
   const keywords = normalizeKeywords(options.keywords);
   const limit = normalizeLimit(options.limit);
@@ -423,10 +426,78 @@ export function normalizeKeywords(input?: string[]): string[] {
   );
 }
 
+export function resolvePromptsChatMcpUrl(input: string): string {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error("prompts.chat MCP URL must be a valid URL.");
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error("prompts.chat MCP URL must use https.");
+  }
+
+  const normalized = normalizeUrl(url);
+  const allowedUrls = new Set([
+    DEFAULT_PROMPTS_CHAT_MCP_URL,
+    ...parseCsvEnv(ALLOWED_MCP_URL_ENV).map((value) => normalizeAllowedUrl(value, ALLOWED_MCP_URL_ENV)),
+  ]);
+  const allowedOrigins = new Set([
+    new URL(DEFAULT_PROMPTS_CHAT_MCP_URL).origin,
+    ...parseCsvEnv(ALLOWED_MCP_ORIGIN_ENV).map((value) =>
+      normalizeAllowedOrigin(value, ALLOWED_MCP_ORIGIN_ENV)
+    ),
+  ]);
+
+  if (!allowedUrls.has(normalized) && !allowedOrigins.has(url.origin)) {
+    throw new Error(
+      `prompts.chat MCP URL is not allowed. Use ${DEFAULT_PROMPTS_CHAT_MCP_URL}, or set ${ALLOWED_MCP_URL_ENV}/${ALLOWED_MCP_ORIGIN_ENV} for trusted endpoints.`
+    );
+  }
+
+  return normalized;
+}
+
 function normalizeLimit(limit?: number): number | undefined {
   if (limit === undefined) return undefined;
   if (!Number.isFinite(limit) || limit <= 0) throw new Error("limit must be a positive number.");
   return Math.floor(limit);
+}
+
+function parseCsvEnv(name: string): string[] {
+  return (process.env[name] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function normalizeUrl(url: URL): string {
+  url.hash = "";
+  if (url.pathname.length > 1) {
+    url.pathname = url.pathname.replace(/\/+$/g, "");
+  }
+  return url.toString();
+}
+
+function normalizeAllowedUrl(value: string, envName: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") throw new Error("must use https");
+    return normalizeUrl(url);
+  } catch {
+    throw new Error(`${envName} contains an invalid HTTPS URL.`);
+  }
+}
+
+function normalizeAllowedOrigin(value: string, envName: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") throw new Error("must use https");
+    return url.origin;
+  } catch {
+    throw new Error(`${envName} contains an invalid HTTPS origin.`);
+  }
 }
 
 function buildHeaders(): Record<string, string> | undefined {
