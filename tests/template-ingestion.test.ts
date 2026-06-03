@@ -8,7 +8,8 @@ if (existsSync(testDbPath)) unlinkSync(testDbPath);
 process.env.PROMPTIT_DB_PATH = testDbPath;
 
 const { initDatabase } = await import("../src/database");
-const { normalizePromptToTemplate, validateTemplateRecord } = await import("../src/promptsChatSync");
+const { normalizePromptToTemplate, normalizeSearchPromptToTemplate, validateTemplateRecord } =
+  await import("../src/promptsChatSync");
 const { selectBestTemplate } = await import("../src/templates");
 
 initDatabase();
@@ -38,7 +39,26 @@ test("normalizes prompts.chat prompt content into a TemplateRecord", () => {
   expect(template.source).toBe("prompts.chat");
   expect(template.intent_type).toBe("coding");
   expect(template.task_type).toBe("review");
-  expect(template.instructions).toContain("Review the code");
+  expect(template.instructions).toContain("Use the prompts.chat template");
+  expect(validateTemplateRecord(template)).toEqual([]);
+});
+
+test("normalizes search_prompts results without storing full prompt content", () => {
+  const template = normalizeSearchPromptToTemplate({
+    id: "code-review-assistant",
+    title: "Code Review Assistant",
+    description: "A prompt for conducting thorough code reviews.",
+    content: "This is a long prompt body that should not be copied into local template instructions.",
+    category: "Development",
+    tags: ["coding", "review", "development"],
+    votes: 42,
+  });
+
+  expect(template.id).toBe("prompts-chat.code-review-assistant");
+  expect(template.intent_type).toBe("coding");
+  expect(template.task_type).toBe("review");
+  expect(template.instructions).toContain("A prompt for conducting thorough code reviews.");
+  expect(template.instructions).not.toContain("This is a long prompt body");
   expect(validateTemplateRecord(template)).toEqual([]);
 });
 

@@ -1,7 +1,11 @@
 import { createHash } from "crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { GetPromptResultSchema, ListPromptsResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolResultSchema,
+  GetPromptResultSchema,
+  ListPromptsResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { upsertTemplates, type TemplateRecord } from "./database";
 
 const DEFAULT_PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp";
@@ -21,6 +25,19 @@ export type PromptsChatPromptContent = {
       | { type: "text"; text: string }
       | { type: string; [key: string]: unknown };
   }>;
+};
+
+export type PromptsChatSearchPrompt = {
+  id: string;
+  title?: string;
+  description?: string;
+  content?: string;
+  type?: string;
+  author?: string;
+  category?: string;
+  tags?: string[];
+  votes?: number;
+  createdAt?: string;
 };
 
 export type SyncPromptsChatOptions = {
@@ -63,16 +80,11 @@ type IntentConfig = {
 };
 
 const DEFAULT_KEYWORDS = [
-  "software",
-  "developer",
-  "engineering",
-  "programming",
-  "devops",
-  "architecture",
-  "research",
-  "writing",
-  "review",
-  "documentation",
+  "code review",
+  "software implementation",
+  "architecture planning",
+  "technical research",
+  "clear writing",
 ];
 
 const INTENT_CONFIGS: IntentConfig[] = [
@@ -82,7 +94,19 @@ const INTENT_CONFIGS: IntentConfig[] = [
     task_type: "review",
     seniority_level: "advanced",
     output_style: "findings first",
-    keywords: ["review", "audit", "bug", "risk", "regression", "security", "performance"],
+    keywords: [
+      "review",
+      "audit",
+      "bug",
+      "bugs",
+      "risk",
+      "risks",
+      "regression",
+      "security",
+      "performance",
+      "maintainability",
+      "quality",
+    ],
   },
   {
     intent_type: "coding",
@@ -92,13 +116,25 @@ const INTENT_CONFIGS: IntentConfig[] = [
     output_style: "concise implementation prompt",
     keywords: [
       "code",
+      "coding",
       "fix",
+      "repair",
+      "debug",
       "implement",
+      "implementation",
+      "feature",
       "build",
       "test",
+      "tests",
       "typescript",
       "javascript",
+      "bun",
+      "node",
       "repo",
+      "repository",
+      "branch",
+      "commit",
+      "push",
       "server",
       "runtime",
     ],
@@ -109,7 +145,23 @@ const INTENT_CONFIGS: IntentConfig[] = [
     task_type: "architecture",
     seniority_level: "intermediate",
     output_style: "architecture decision record",
-    keywords: ["architecture", "system", "design", "stack", "roadmap", "deploy", "cloud", "local"],
+    keywords: [
+      "architecture",
+      "architect",
+      "system",
+      "design",
+      "stack",
+      "roadmap",
+      "deploy",
+      "deployment",
+      "cloud",
+      "local",
+      "database",
+      "scalability",
+      "migration",
+      "tradeoff",
+      "tradeoffs",
+    ],
   },
   {
     intent_type: "research",
@@ -117,7 +169,20 @@ const INTENT_CONFIGS: IntentConfig[] = [
     task_type: "research",
     seniority_level: "intermediate",
     output_style: "sourced answer",
-    keywords: ["research", "latest", "compare", "source", "verify", "citation", "find"],
+    keywords: [
+      "research",
+      "latest",
+      "current",
+      "compare",
+      "comparison",
+      "source",
+      "sources",
+      "verify",
+      "citation",
+      "citations",
+      "find",
+      "lookup",
+    ],
   },
   {
     intent_type: "writing",
@@ -125,7 +190,21 @@ const INTENT_CONFIGS: IntentConfig[] = [
     task_type: "drafting",
     seniority_level: "beginner",
     output_style: "plain language",
-    keywords: ["write", "explain", "email", "summary", "docs", "copy", "paragraph", "sentence"],
+    keywords: [
+      "write",
+      "writing",
+      "explain",
+      "email",
+      "summary",
+      "summarize",
+      "docs",
+      "documentation",
+      "copy",
+      "paragraph",
+      "sentence",
+      "rewrite",
+      "edit",
+    ],
   },
 ];
 
@@ -150,35 +229,45 @@ export async function syncPromptsChatTemplates(
 
   await client.connect(transport);
   try {
-    const prompts = await listPrompts(client);
-    const matched = filterPrompts(prompts, keywords).slice(0, limit ?? undefined);
+    const searchResults = await searchPrompts(client, keywords, limit);
+    const prompts = searchResults.length > 0 ? searchResults : await listPrompts(client);
+    const matched =
+      searchResults.length > 0
+        ? prompts.slice(0, limit ?? undefined)
+        : filterPrompts(prompts as PromptsChatPromptItem[], keywords).slice(0, limit ?? undefined);
     const templates: TemplateRecord[] = [];
     const errors: TemplateValidationError[] = [];
     const seen = new Set<string>();
 
     for (const prompt of matched) {
+      const promptName = getPromptName(prompt);
       try {
-        const content = await getPromptContent(client, prompt);
-        const template = normalizePromptToTemplate(prompt, content);
+        const template =
+          isSearchPrompt(prompt)
+            ? normalizeSearchPromptToTemplate(prompt)
+            : normalizePromptToTemplate(
+                prompt,
+                await getPromptContent(client, prompt)
+              );
         const validation = validateTemplateRecord(template);
         if (validation.length > 0) {
           errors.push(
             ...validation.map((reason) => ({
-              prompt_name: prompt.name,
+              prompt_name: promptName,
               reason,
             }))
           );
           continue;
         }
         if (seen.has(template.id)) {
-          errors.push({ prompt_name: prompt.name, reason: `Duplicate template id: ${template.id}` });
+          errors.push({ prompt_name: promptName, reason: `Duplicate template id: ${template.id}` });
           continue;
         }
         seen.add(template.id);
         templates.push(template);
       } catch (error: unknown) {
         errors.push({
-          prompt_name: prompt.name,
+          prompt_name: promptName,
           reason: error instanceof Error ? error.message : String(error),
         });
       }
@@ -245,13 +334,56 @@ export function normalizePromptToTemplate(
     tags: tags.join(","),
     seniority_level: intent.seniority_level,
     output_style: intent.output_style,
-    instructions:
-      fullText ||
-      prompt.description?.trim() ||
-      content.description?.trim() ||
-      `Use this template to structure ${intent.intent_type} requests.`,
+    instructions: buildDerivedInstructions({
+      title: prompt.title?.trim() || humanizeName(prompt.name),
+      description: prompt.description?.trim() || content.description?.trim(),
+      category: intent.domain,
+      tags,
+      intent,
+    }),
     expected_output: buildExpectedOutput(intent),
     quality_score: scoreTemplateQuality(prompt, content, fullText, tags),
+  };
+}
+
+export function normalizeSearchPromptToTemplate(prompt: PromptsChatSearchPrompt): TemplateRecord {
+  const haystack = [
+    prompt.id,
+    prompt.title ?? "",
+    prompt.description ?? "",
+    prompt.content ?? "",
+    prompt.category ?? "",
+    ...(prompt.tags ?? []),
+  ].join(" ");
+  const intent = inferIntentConfig(haystack);
+  const tags = buildTags(haystack, intent, prompt.tags);
+  const hash = hashContent(
+    [prompt.id, prompt.title ?? "", prompt.description ?? "", prompt.category ?? "", tags.join(",")].join("\n")
+  );
+
+  return {
+    id: `prompts-chat.${slugify(prompt.id)}`,
+    name: prompt.title?.trim() || humanizeName(prompt.id),
+    description:
+      prompt.description?.trim() ||
+      `prompts.chat ${prompt.category ?? intent.domain} template for ${intent.intent_type} tasks.`,
+    source: "prompts.chat",
+    version: hash.slice(0, 12),
+    intent_type: intent.intent_type,
+    domain: prompt.category?.trim().toLowerCase() || intent.domain,
+    task_type: intent.task_type,
+    tags: tags.join(","),
+    seniority_level: intent.seniority_level,
+    output_style: intent.output_style,
+    instructions: buildDerivedInstructions({
+      title: prompt.title?.trim() || humanizeName(prompt.id),
+      description: prompt.description?.trim(),
+      category: prompt.category,
+      tags,
+      intent,
+    }),
+    expected_output: buildExpectedOutput(intent),
+    quality_score: scoreSearchPromptQuality(prompt, tags),
   };
 }
 
@@ -320,6 +452,86 @@ async function listPrompts(client: Client): Promise<PromptsChatPromptItem[]> {
   return prompts;
 }
 
+async function searchPrompts(
+  client: Client,
+  queries: string[],
+  limit?: number
+): Promise<PromptsChatSearchPrompt[]> {
+  const results: PromptsChatSearchPrompt[] = [];
+  const seen = new Set<string>();
+  const perQueryLimit = Math.min(50, Math.max(1, limit ?? 10));
+
+  for (const query of queries) {
+    const response = await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "search_prompts",
+          arguments: {
+            query,
+            limit: perQueryLimit,
+          },
+        },
+      },
+      CallToolResultSchema
+    );
+    for (const prompt of extractSearchPrompts(response)) {
+      if (seen.has(prompt.id)) continue;
+      seen.add(prompt.id);
+      results.push(prompt);
+      if (limit && results.length >= limit) return results;
+    }
+  }
+
+  return results;
+}
+
+function extractSearchPrompts(result: unknown): PromptsChatSearchPrompt[] {
+  const structured = (result as { structuredContent?: unknown }).structuredContent;
+  const fromStructured = parseSearchPayload(structured);
+  if (fromStructured.length > 0) return fromStructured;
+
+  const content = (result as { content?: Array<{ type: string; text?: string }> }).content ?? [];
+  for (const item of content) {
+    if (item.type !== "text" || !item.text) continue;
+    const parsed = safeJsonParse(item.text);
+    const prompts = parseSearchPayload(parsed);
+    if (prompts.length > 0) return prompts;
+  }
+
+  return [];
+}
+
+function parseSearchPayload(payload: unknown): PromptsChatSearchPrompt[] {
+  if (!payload || typeof payload !== "object") return [];
+  const maybePrompts = (payload as { prompts?: unknown }).prompts;
+  if (!Array.isArray(maybePrompts)) return [];
+  return maybePrompts
+    .map((item) => normalizeSearchPayloadItem(item))
+    .filter((item): item is PromptsChatSearchPrompt => item !== null);
+}
+
+function normalizeSearchPayloadItem(item: unknown): PromptsChatSearchPrompt | null {
+  if (!item || typeof item !== "object") return null;
+  const record = item as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id : undefined;
+  if (!id) return null;
+  return {
+    id,
+    title: typeof record.title === "string" ? record.title : undefined,
+    description: typeof record.description === "string" ? record.description : undefined,
+    content: typeof record.content === "string" ? record.content : undefined,
+    type: typeof record.type === "string" ? record.type : undefined,
+    author: typeof record.author === "string" ? record.author : undefined,
+    category: typeof record.category === "string" ? record.category : undefined,
+    tags: Array.isArray(record.tags)
+      ? record.tags.filter((tag): tag is string => typeof tag === "string")
+      : undefined,
+    votes: typeof record.votes === "number" ? record.votes : undefined,
+    createdAt: typeof record.createdAt === "string" ? record.createdAt : undefined,
+  };
+}
+
 async function getPromptContent(
   client: Client,
   prompt: PromptsChatPromptItem
@@ -356,6 +568,14 @@ function inferIntentConfig(input: string): IntentConfig {
   const lower = input.toLowerCase();
   const fallback = INTENT_CONFIGS[0];
   if (!fallback) throw new Error("No intent configs are available.");
+  const reviewConfig = INTENT_CONFIGS.find((config) => config.task_type === "review");
+  if (
+    reviewConfig &&
+    /\b(review|audit)\b/.test(lower) &&
+    /\b(code|coding|bug|bugs|test|tests|security|regression|risk|risks)\b/.test(lower)
+  ) {
+    return reviewConfig;
+  }
   let best = fallback;
   let bestScore = -1;
   for (const config of INTENT_CONFIGS) {
@@ -368,16 +588,51 @@ function inferIntentConfig(input: string): IntentConfig {
   return best;
 }
 
+function isSearchPrompt(
+  prompt: PromptsChatPromptItem | PromptsChatSearchPrompt
+): prompt is PromptsChatSearchPrompt {
+  return "id" in prompt && !("name" in prompt);
+}
+
+function getPromptName(prompt: PromptsChatPromptItem | PromptsChatSearchPrompt): string {
+  return "name" in prompt ? prompt.name : prompt.id;
+}
+
 function extractTextContent(content: PromptsChatPromptContent["messages"][number]["content"]): string {
   if (content.type !== "text") return "";
   const text = "text" in content ? content.text : "";
   return typeof text === "string" ? text.trim() : "";
 }
 
-function buildTags(input: string, intent: IntentConfig): string[] {
+function buildTags(input: string, intent: IntentConfig, sourceTags: string[] = []): string[] {
   const lower = input.toLowerCase();
   const keywordTags = intent.keywords.filter((keyword) => lower.includes(keyword));
-  return Array.from(new Set([intent.intent_type, intent.domain, intent.task_type, ...keywordTags])).slice(0, 12);
+  return Array.from(
+    new Set(
+      [intent.intent_type, intent.domain, intent.task_type, ...sourceTags, ...keywordTags]
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  ).slice(0, 12);
+}
+
+function buildDerivedInstructions(args: {
+  title: string;
+  description?: string;
+  category?: string;
+  tags: string[];
+  intent: IntentConfig;
+}): string {
+  return [
+    `Use the prompts.chat template "${args.title}" as routing and structure guidance.`,
+    args.description ? `Template summary: ${args.description}` : "",
+    args.category ? `Category: ${args.category}` : "",
+    args.tags.length > 0 ? `Relevant tags: ${args.tags.join(", ")}` : "",
+    `Rewrite the user's messy request as a ${args.intent.output_style}.`,
+    "Preserve the user's concrete intent and avoid copying unrelated template content.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function buildExpectedOutput(intent: IntentConfig): string {
@@ -410,6 +665,25 @@ function scoreTemplateQuality(
   if (tags.length >= 4) score += 0.06;
   if ((prompt.arguments ?? []).some((arg) => arg.description?.trim())) score += 0.03;
   return Math.max(0, Math.min(1, Number(score.toFixed(2))));
+}
+
+function scoreSearchPromptQuality(prompt: PromptsChatSearchPrompt, tags: string[]): number {
+  let score = 0.45;
+  if (prompt.title?.trim()) score += 0.08;
+  if (prompt.description?.trim()) score += 0.12;
+  if (prompt.category?.trim()) score += 0.07;
+  if ((prompt.tags ?? []).length > 0) score += 0.08;
+  if (tags.length >= 4) score += 0.05;
+  if (typeof prompt.votes === "number") score += Math.min(0.15, Math.max(0, prompt.votes) / 500);
+  return Math.max(0, Math.min(1, Number(score.toFixed(2))));
+}
+
+function safeJsonParse(input: string): unknown {
+  try {
+    return JSON.parse(input);
+  } catch {
+    return null;
+  }
 }
 
 function slugify(input: string): string {
