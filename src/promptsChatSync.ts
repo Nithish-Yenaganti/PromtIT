@@ -6,7 +6,7 @@ import {
   GetPromptResultSchema,
   ListPromptsResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { upsertTemplates, type TemplateRecord } from "./database";
+import { initDatabase, upsertTemplates, type TemplateRecord } from "./database";
 
 const DEFAULT_PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp";
 const ALLOWED_MCP_URL_ENV = "PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS";
@@ -213,6 +213,8 @@ const INTENT_CONFIGS: IntentConfig[] = [
 export async function syncPromptsChatTemplates(
   options: SyncPromptsChatOptions = {}
 ): Promise<SyncPromptsChatResult> {
+  initDatabase();
+
   const serverUrl = resolvePromptsChatMcpUrl(
     options.serverUrl?.trim() ||
     process.env.PROMPTS_CHAT_MCP_URL?.trim() ||
