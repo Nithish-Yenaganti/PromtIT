@@ -129,7 +129,20 @@ For each messy request:
 - `normalize_prompt`: select a prompts.chat-style template and return host-LLM refinement context; when called with `converted_prompt`, return the review payload.
 - `regenerate_prompt`: update the review session when the user asks for a different version and increment template regeneration stats.
 - `commit_prompt`: approve the current or user-edited prompt, update aggregate template stats, and return `final_prompt` for the host to send.
+- `sync_prompts_chat`: fetch prompts.chat templates, normalize and validate them, then upsert valid templates into the local SQLite template cache.
 PromptIT does not run a generative model, does not run embeddings, does not store raw messy prompts, and does not own final delivery.
+
+## Template Ingestion
+
+PromptIT does not call prompts.chat during normal prompt routing. Run `sync_prompts_chat` from an MCP host, or run `bun run prompts:chat:sync -- --dry-run`, to fetch templates from `PROMPTS_CHAT_MCP_URL` and import valid templates into SQLite.
+
+```json
+{
+  "keywords": ["engineering", "review", "architecture"],
+  "limit": 25,
+  "dry_run": true
+}
+```
 
 ## Review Payload Shape
 

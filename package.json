@@ -18,7 +18,8 @@
     "start": "bun run ./src/server.ts",
     "start:dist": "bun run ./dist/server.js",
     "config:codex": "bash scripts/render-codex-config.sh",
-    "prompts:chat:engineering": "bun run ./scripts/fetch-prompts-chat-engineering.ts"
+    "test": "bun test",
+    "prompts:chat:sync": "bun run ./scripts/fetch-prompts-chat-engineering.ts"
   },
   "module": "src/server.ts"
 }

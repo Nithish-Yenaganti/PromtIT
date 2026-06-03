@@ -4,6 +4,7 @@ import {
   MAX_TEXT_CHARS,
   parsePositiveNumberEnv,
 } from "./config";
+import { syncPromptsChatTemplates } from "./promptsChatSync";
 import { recordTemplateStat, selectBestTemplate, type TemplateMatch } from "./templates";
 
 type NormalizeArgs = {
@@ -25,6 +26,13 @@ type CommitArgs = {
   executionToken: string;
   finalPrompt?: string;
   destination?: string;
+};
+
+type SyncPromptsChatArgs = {
+  keywords?: string[];
+  limit?: number;
+  dryRun?: boolean;
+  serverUrl?: string;
 };
 
 type RefinementSession = {
@@ -130,6 +138,37 @@ export function getPromptItToolDefinitions() {
         required: ["task_id", "execution_token"],
       },
     },
+    {
+      name: "sync_prompts_chat",
+      description:
+        "Fetches prompts.chat templates, normalizes them into PromptIT template records, validates them, dedupes them, and upserts valid templates into the local SQLite cache.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          keywords: {
+            oneOf: [
+              { type: "array", items: { type: "string" } },
+              { type: "string" },
+            ],
+            description:
+              "Optional keywords used to filter prompts before import. Defaults to PROMPTS_CHAT_KEYWORDS or PromptIT's built-in template keywords.",
+          },
+          limit: {
+            type: "number",
+            description: "Optional maximum number of matched prompts to fetch and normalize.",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "When true, validates and summarizes templates without writing to SQLite.",
+          },
+          server_url: {
+            type: "string",
+            description:
+              "Optional prompts.chat MCP URL. Defaults to PROMPTS_CHAT_MCP_URL.",
+          },
+        },
+      },
+    },
   ];
 }
 
@@ -137,7 +176,19 @@ export async function handlePromptItToolCall(name: string, args: unknown) {
   if (name === "normalize_prompt") return handleNormalizePrompt(args);
   if (name === "regenerate_prompt") return handleRegeneratePrompt(args);
   if (name === "commit_prompt") return handleCommitPrompt(args);
+  if (name === "sync_prompts_chat") return handleSyncPromptsChat(args);
   throw new Error("Tool not found");
+}
+
+async function handleSyncPromptsChat(input: unknown) {
+  const { keywords, limit, dryRun, serverUrl } = parseSyncPromptsChatArgs(input);
+  const result = await syncPromptsChatTemplates({
+    keywords,
+    limit,
+    dryRun,
+    serverUrl,
+  });
+  return jsonToolResult(result);
 }
 
 function handleNormalizePrompt(input: unknown) {
@@ -553,6 +604,47 @@ function parseCommitArgs(input: unknown): CommitArgs {
     executionToken: executionTokenRaw,
     finalPrompt: typeof finalPromptRaw === "string" ? finalPromptRaw : undefined,
     destination: typeof destinationRaw === "string" ? destinationRaw : undefined,
+  };
+}
+
+function parseSyncPromptsChatArgs(input: unknown): SyncPromptsChatArgs {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const keywordsRaw = args.keywords;
+  const limitRaw = args.limit;
+  const dryRunRaw = args.dry_run;
+  const serverUrlRaw = args.server_url;
+
+  let keywords: string[] | undefined;
+  if (typeof keywordsRaw === "string") {
+    keywords = keywordsRaw
+      .split(",")
+      .map((keyword) => keyword.trim())
+      .filter(Boolean);
+  } else if (Array.isArray(keywordsRaw)) {
+    if (!keywordsRaw.every((keyword) => typeof keyword === "string" && keyword.trim())) {
+      throw new Error("keywords must contain only non-empty strings.");
+    }
+    keywords = keywordsRaw.map((keyword) => keyword.trim());
+  } else if (keywordsRaw !== undefined) {
+    throw new Error("keywords must be a string or an array of strings when provided.");
+  }
+
+  if (limitRaw !== undefined && (typeof limitRaw !== "number" || !Number.isFinite(limitRaw))) {
+    throw new Error("limit must be a finite number when provided.");
+  }
+  if (limitRaw !== undefined && limitRaw <= 0) {
+    throw new Error("limit must be greater than 0 when provided.");
+  }
+  if (dryRunRaw !== undefined && typeof dryRunRaw !== "boolean") {
+    throw new Error("dry_run must be a boolean when provided.");
+  }
+  assertOptionalString(serverUrlRaw, "server_url");
+
+  return {
+    keywords,
+    limit: typeof limitRaw === "number" ? Math.floor(limitRaw) : undefined,
+    dryRun: typeof dryRunRaw === "boolean" ? dryRunRaw : undefined,
+    serverUrl: typeof serverUrlRaw === "string" ? serverUrlRaw : undefined,
   };
 }
 

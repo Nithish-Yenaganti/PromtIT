@@ -41,7 +41,17 @@ const INTENT_RULES: IntentRule[] = [
   },
   {
     intent: "planning",
-    keywords: ["plan", "architecture", "design", "system", "stack", "roadmap", "deploy"],
+    keywords: [
+      "plan",
+      "architecture",
+      "design",
+      "system",
+      "stack",
+      "roadmap",
+      "deploy",
+      "cloud",
+      "local",
+    ],
   },
   {
     intent: "research",
