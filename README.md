@@ -20,7 +20,7 @@ The project is divided into five small modules:
 * `src/server.ts`: MCP server setup, stdio transport, and tool registration.
 * `src/database.ts`: SQLite template cache and aggregate template stats.
 * `src/templates.ts`: deterministic template ranking and event scoring.
-* `src/refiner.ts`: PromptIT review protocol for normalize, regenerate, commit, and legacy `prompt_it`.
+* `src/refiner.ts`: PromptIT review protocol for normalize, regenerate, and commit.
 * `src/config.ts`: DB paths, token limits, and runtime thresholds.
 
 ## Project Structure
@@ -118,8 +118,6 @@ For each messy request:
 - `normalize_prompt`: select a prompts.chat-style template and return host-LLM refinement context; when called with `converted_prompt`, return the review payload.
 - `regenerate_prompt`: update the review session when the user asks for a different version and increment template regeneration stats.
 - `commit_prompt`: approve the current or user-edited prompt, update aggregate template stats, and return `final_prompt` for the host to send.
-- `prompt_it`: legacy compatibility tool that returns the same template-based host conversion context in text form.
-
 PromptIT does not run a generative model, does not run embeddings, does not store raw messy prompts, and does not own final delivery.
 
 ## Review Payload Shape

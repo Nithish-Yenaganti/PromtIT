@@ -10,7 +10,7 @@ import { getPromptItToolDefinitions, handlePromptItToolCall } from "./refiner";
 initDatabase();
 
 export const promptItServer = new McpServer(
-  { name: "prompt-refiner", version: "3.0.0" },
+  { name: "promptit-mcp", version: "3.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -29,7 +29,7 @@ export async function startPromptItStdioServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await promptItServer.connect(transport);
   stdioStarted = true;
-  process.stderr.write("MCP prompt-refiner server connected (stdio).\n");
+  process.stderr.write("PromptIT MCP server connected (stdio).\n");
 }
 
 await startPromptItStdioServer();

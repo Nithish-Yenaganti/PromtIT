@@ -6,17 +6,11 @@ import {
 } from "./config";
 import { recordTemplateStat, selectBestTemplate, type TemplateMatch } from "./templates";
 
-type PromptItArgs = {
-  messyText: string;
-  strict: boolean;
-};
-
 type NormalizeArgs = {
   messyText: string;
   convertedPrompt?: string;
   taskId?: string;
   executionToken?: string;
-  strict: boolean;
 };
 
 type RegenerateArgs = {
@@ -31,15 +25,12 @@ type CommitArgs = {
   executionToken: string;
   finalPrompt?: string;
   destination?: string;
-  score: number;
 };
 
 type RefinementSession = {
   taskId: string;
   executionToken: string;
   expiresAtMs: number;
-  storeDone: boolean;
-  feedbackDone: boolean;
   rawText?: string;
   currentPrompt?: string;
   templateId?: string;
@@ -59,26 +50,6 @@ const refinementSessions = new Map<string, RefinementSession>();
 
 export function getPromptItToolDefinitions() {
   return [
-    {
-      name: "prompt_it",
-      description:
-        "Legacy entrypoint: takes messy text, selects a prompts.chat-style template, and returns a host-ready conversion payload.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          messy_text: {
-            type: "string",
-            description: "The messy user input to prepare for host-side conversion.",
-          },
-          strict: {
-            type: "boolean",
-            description:
-              "When true (default), prompt_it returns enforcement metadata (task_id, execution_token, required_steps).",
-          },
-        },
-        required: ["messy_text"],
-      },
-    },
     {
       name: "normalize_prompt",
       description:
@@ -104,11 +75,6 @@ export function getPromptItToolDefinitions() {
             type: "string",
             description:
               "Optional existing execution token. Use with task_id when returning a host-generated converted_prompt.",
-          },
-          strict: {
-            type: "boolean",
-            description:
-              "When true (default), includes task_id and execution_token for the review session.",
           },
         },
         required: ["messy_text"],
@@ -160,11 +126,6 @@ export function getPromptItToolDefinitions() {
             type: "string",
             description: "Optional host destination label, for example codex or claude.",
           },
-          score: {
-            type: "number",
-            description:
-              "Optional approval score from 0 to 1. Defaults to 1 for explicit user approval.",
-          },
         },
         required: ["task_id", "execution_token"],
       },
@@ -173,36 +134,14 @@ export function getPromptItToolDefinitions() {
 }
 
 export async function handlePromptItToolCall(name: string, args: unknown) {
-  if (name === "prompt_it") return handleLegacyPromptIt(args);
   if (name === "normalize_prompt") return handleNormalizePrompt(args);
   if (name === "regenerate_prompt") return handleRegeneratePrompt(args);
   if (name === "commit_prompt") return handleCommitPrompt(args);
   throw new Error("Tool not found");
 }
 
-function handleLegacyPromptIt(input: unknown) {
-  const { messyText, strict } = parsePromptItArgs(input);
-  const { sensitiveNotice, conversionInput } = buildConversionContext(messyText);
-  const session = createSession();
-  const strictMeta = strict
-    ? [
-        "",
-        "ENFORCEMENT:",
-        `TASK_ID: ${session.taskId}`,
-        `EXECUTION_TOKEN: ${session.executionToken}`,
-        `TOKEN_TTL_SECONDS: ${Math.floor(EXECUTION_TOKEN_TTL_MS / 1000)}`,
-        "REQUIRED_STEPS: normalize_prompt -> commit_prompt",
-      ].join("\n")
-    : "";
-
-  return textToolResult(
-    `${sensitiveNotice ? `${sensitiveNotice}\n\n` : ""}${conversionInput}${strictMeta}`
-  );
-}
-
 function handleNormalizePrompt(input: unknown) {
-  const { messyText, convertedPrompt, taskId, executionToken, strict } =
-    parseNormalizeArgs(input);
+  const { messyText, convertedPrompt, taskId, executionToken } = parseNormalizeArgs(input);
   const existingSession =
     taskId && executionToken ? validateSession(taskId, executionToken) : undefined;
   const session = existingSession ?? createSession();
@@ -231,7 +170,6 @@ function handleNormalizePrompt(input: unknown) {
       conversionInput,
       templateMatch,
       notices: [
-        strict ? "" : "strict=false was accepted, but review sessions still require task credentials.",
         sensitiveNotice,
         sanitizedConverted?.redacted
           ? "Potential secrets were redacted from converted_prompt."
@@ -303,7 +241,7 @@ function handleRegeneratePrompt(input: unknown) {
 }
 
 function handleCommitPrompt(input: unknown) {
-  const { taskId, executionToken, finalPrompt, destination, score } = parseCommitArgs(input);
+  const { taskId, executionToken, finalPrompt, destination } = parseCommitArgs(input);
   const session = validateSession(taskId, executionToken);
   if (!session.rawText) {
     fail(
@@ -335,8 +273,6 @@ function handleCommitPrompt(input: unknown) {
   if (wasEdited) recordTemplateStat(session.templateId, "edited");
 
   session.currentPrompt = sanitizedFinal.text;
-  session.storeDone = true;
-  session.feedbackDone = true;
   session.committed = true;
   refinementSessions.delete(taskId);
 
@@ -516,8 +452,6 @@ function createSession(): RefinementSession {
     taskId,
     executionToken,
     expiresAtMs: now + EXECUTION_TOKEN_TTL_MS,
-    storeDone: false,
-    feedbackDone: false,
     revisionCount: 0,
     committed: false,
   };
@@ -531,7 +465,7 @@ function validateSession(taskIdRaw: string, tokenRaw: string): RefinementSession
   if (!session) {
     fail(
       "ERR_PROMPT_IT_REQUIRED",
-      "No active refinement session. Call normalize_prompt or legacy prompt_it first to get a task_id and execution_token."
+      "No active refinement session. Call normalize_prompt first to get a task_id and execution_token."
     );
   }
   if (session.executionToken !== tokenRaw) {
@@ -544,29 +478,12 @@ function validateSession(taskIdRaw: string, tokenRaw: string): RefinementSession
   return session;
 }
 
-function parsePromptItArgs(input: unknown): PromptItArgs {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const messyTextRaw = args.messy_text;
-  const strictRaw = args.strict;
-
-  assertString(messyTextRaw, "messy_text");
-  if (messyTextRaw.length > MAX_TEXT_CHARS) {
-    throw new Error(`messy_text cannot exceed ${MAX_TEXT_CHARS} characters.`);
-  }
-  if (strictRaw !== undefined && typeof strictRaw !== "boolean") {
-    throw new Error("strict must be a boolean when provided.");
-  }
-
-  return { messyText: messyTextRaw, strict: strictRaw ?? true };
-}
-
 function parseNormalizeArgs(input: unknown): NormalizeArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const messyTextRaw = args.messy_text;
   const convertedPromptRaw = args.converted_prompt;
   const taskIdRaw = args.task_id;
   const executionTokenRaw = args.execution_token;
-  const strictRaw = args.strict;
 
   assertString(messyTextRaw, "messy_text");
   assertOptionalString(convertedPromptRaw, "converted_prompt");
@@ -581,16 +498,12 @@ function parseNormalizeArgs(input: unknown): NormalizeArgs {
   if (typeof convertedPromptRaw === "string" && convertedPromptRaw.length > MAX_TEXT_CHARS) {
     throw new Error(`converted_prompt cannot exceed ${MAX_TEXT_CHARS} characters.`);
   }
-  if (strictRaw !== undefined && typeof strictRaw !== "boolean") {
-    throw new Error("strict must be a boolean when provided.");
-  }
 
   return {
     messyText: messyTextRaw,
     convertedPrompt: typeof convertedPromptRaw === "string" ? convertedPromptRaw : undefined,
     taskId: typeof taskIdRaw === "string" ? taskIdRaw : undefined,
     executionToken: typeof executionTokenRaw === "string" ? executionTokenRaw : undefined,
-    strict: strictRaw ?? true,
   };
 }
 
@@ -626,7 +539,6 @@ function parseCommitArgs(input: unknown): CommitArgs {
   const executionTokenRaw = args.execution_token;
   const finalPromptRaw = args.final_prompt;
   const destinationRaw = args.destination;
-  const scoreRaw = args.score;
 
   assertString(taskIdRaw, "task_id");
   assertString(executionTokenRaw, "execution_token");
@@ -635,20 +547,12 @@ function parseCommitArgs(input: unknown): CommitArgs {
   if (typeof finalPromptRaw === "string" && finalPromptRaw.length > MAX_TEXT_CHARS) {
     throw new Error(`final_prompt cannot exceed ${MAX_TEXT_CHARS} characters.`);
   }
-  if (scoreRaw !== undefined && (typeof scoreRaw !== "number" || !Number.isFinite(scoreRaw))) {
-    throw new Error("score must be a number between 0 and 1 when provided.");
-  }
-  const score = typeof scoreRaw === "number" ? scoreRaw : 1;
-  if (score < 0 || score > 1) {
-    throw new Error("score must be between 0 and 1.");
-  }
 
   return {
     taskId: taskIdRaw,
     executionToken: executionTokenRaw,
     finalPrompt: typeof finalPromptRaw === "string" ? finalPromptRaw : undefined,
     destination: typeof destinationRaw === "string" ? destinationRaw : undefined,
-    score,
   };
 }
 

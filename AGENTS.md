@@ -9,7 +9,7 @@ alwaysApply: true
 
 - Refinement policy source of truth: use `PROMPTENGINEER.md` whenever `prompt_engineer` is invoked. Do not invent alternate rewrite rules outside that file.
 - Transparency rule: before execution, print a short `PromptIT Pipeline (Live)` status block and update progress after each major step (received input, selected template, built host payload, generated refined prompt, review/execute, template stats recorded). Keep updates concise and never expose secrets/tokens/full local absolute paths.
-- UI clarity rule: never print raw legacy `prompt_it` payload/schema blocks in user-facing output. For the review protocol, show only the converted prompt and concise review status unless the user explicitly asks for protocol JSON.
+- UI clarity rule: show only the converted prompt and concise review status unless the user explicitly asks for protocol JSON.
 - Fast-path rule: tiny mechanical tasks may skip refinement (safe examples: single rename, one-line typo fix, quick grep/list/check, non-substantive formatting touch). Everything else must use full refinement pipeline.
 - PROTOCOL: User should provide only messy text. For any new non-tiny task, you MUST run this pipeline before making any changes or perform tasks:
   1. Call `normalize_prompt(messy_text=raw_user_text)` to select a prompts.chat-style template and create a `promptit.review.v1` task.
@@ -20,5 +20,5 @@ alwaysApply: true
   6. When approved or when immediate execution is required by the host, call `commit_prompt(task_id, execution_token, final_prompt=approved_text, destination=host_name)`.
   7. Execute/send the returned `final_prompt` immediately. Do not assume coding-only intent.
 - Never skip the refinement pipeline for medium/large/ambiguous tasks.
-- Never run web search, file edits, code execution, or any external tool calls before `normalize_prompt` or legacy `prompt_it` for medium/large/ambiguous requests.
+- Never run web search, file edits, code execution, or any external tool calls before `normalize_prompt` for medium/large/ambiguous requests.
 - Never execute substantive coding work directly from messy text.

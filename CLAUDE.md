@@ -26,7 +26,7 @@ This project is stdio-only MCP. Use `src/server.ts` as the MCP entrypoint.
 
 ### Output Rules
 
-- Print `Converted Prompt` (not raw legacy payload/schema dumps).
+- Print `Converted Prompt`; do not dump protocol JSON unless the user asks for it.
 - Treat PromptIT as a template router and tool-only approval protocol; Claude Code owns rendering, host-LLM refinement, and final send.
 - Keep status concise and transparent.
 - Do not expose secrets or full absolute local paths in chat.

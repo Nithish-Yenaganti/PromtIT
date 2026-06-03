@@ -4,7 +4,6 @@ import path from "path";
 export const MAX_TEXT_CHARS = 16000;
 export const DEFAULT_CHARS_PER_TOKEN = 4;
 export const EXECUTION_TOKEN_TTL_MS = 30 * 60 * 1000;
-export const TEMPLATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const DATABASE_CANDIDATE_PATHS = [
   process.env.PROMPTIT_DB_PATH?.trim(),
