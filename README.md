@@ -33,6 +33,11 @@ promptit-mcp/
 │   ├── templates.ts   # Template routing and ranking
 │   ├── refiner.ts     # Review protocol and host-LLM payload orchestration
 │   └── config.ts      # DB paths, limits, thresholds
+├── scripts/
+│   ├── render-codex-config.sh
+│   └── fetch-prompts-chat-engineering.ts
+├── config.example.toml
+├── PROMPTENGINEER.md
 ├── package.json       # Bun/TypeScript dependencies and scripts
 └── README.md
 ```
@@ -45,18 +50,24 @@ MCP gives PromptIT a clean tool boundary. The server can select templates, retur
 
 ```bash
 bun install
-bun run ./src/server.ts
+bun run start
 ```
 
-## Codex Extension Setup (Stdio Mode)
+## MCP Host Setup
 
-Quick auto-setup:
+PromptIT ships as a stdio MCP server. The repository does not install itself into global Codex or project-level host config; generate a config snippet and add it to the host you want to use.
 
 ```bash
-bash scripts/setup-codex-config.sh
+bash scripts/render-codex-config.sh
 ```
 
-Manual config:
+Write the rendered snippet to a local file if you want to inspect it first:
+
+```bash
+bash scripts/render-codex-config.sh --output ./promptit.codex.toml
+```
+
+The rendered config follows this shape:
 
 ```toml
 [mcp_servers.prompt_it]
