@@ -1,6 +1,15 @@
 [![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 # PromptIT MCP Server
 
+```text
+ ____                            _   ___ _____
+|  _ \ _ __ ___  _ __ ___  _ __ | |_|_ _|_   _|
+| |_) | '__/ _ \| '_ ` _ \| '_ \| __|| |  | |
+|  __/| | | (_) | | | | | | |_) | |_ | |  | |
+|_|   |_|  \___/|_| |_| |_| .__/ \__|___| |_|
+                          |_|
+```
+
 PromptIT is a local-first Model Context Protocol (MCP) server that turns messy user requests into reviewable prompt payloads using prompts.chat-style templates. It stays a tool layer, not an app: the MCP host owns the UI, the host LLM performs the actual rewrite, and PromptIT coordinates template selection, review state, and lightweight template stats.
 
 ## Core Logic
