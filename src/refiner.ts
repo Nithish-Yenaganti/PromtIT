@@ -59,7 +59,7 @@ export function getPromptItToolDefinitions() {
     {
       name: "normalize_prompt",
       description:
-        "Starts or updates a tool-only PromptIT review session. Selects a template and returns host-LLM refinement context plus edit/regenerate/send actions.",
+        "Starts or updates a tool-only PromptIT review session. Selects a template and returns host-LLM refinement context plus machine-readable review state.",
       inputSchema: {
         type: "object",
         properties: {

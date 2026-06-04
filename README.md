@@ -21,7 +21,7 @@ PromptIT no longer runs embedding models and no longer stores raw prompt history
 1. Template Routing: classify the messy request with deterministic keyword/tag rules.
 2. Template Selection: choose the best cached prompts.chat-style template using intent, tags, quality score, and aggregate stats.
 3. Host LLM Payload: return the messy request plus selected template instructions so the host LLM can generate the refined prompt.
-4. Review Protocol: return `promptit.review.v1` payloads for edit, regenerate, and send/execute.
+4. Review Protocol: return `promptit.review.v1` payloads for host-side edit, regenerate, and send/execute controls.
 5. Minimal Learning: store only template-level counters such as selected, edited, regenerated, accepted, rejected, and executed counts.
 
 ## System Architecture
@@ -133,10 +133,10 @@ Follow PROMPTENGINEER.md as the single source of truth for refinement policy.
 For each messy request:
 0. For medium/large/ambiguous tasks, do not run web search, file edits, code execution, or any other tool before normalize_prompt.
 0b. Tiny mechanical tasks may skip PromptIT.
-1. Call prompt_it.normalize_prompt with messy_text.
-2. If status is needs_host_refinement, use conversion_context.payload to generate converted_prompt with the host LLM.
-3. Call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.
-4. Show Converted Prompt and concise edit/regenerate/send actions.
+1. Silently call prompt_it.normalize_prompt with messy_text.
+2. If status is needs_host_refinement, silently use conversion_context.payload to generate converted_prompt with the host LLM.
+3. Silently call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.
+4. When showing the review to the user, print only the converted_prompt text and nothing else.
 5. Use prompt_it.regenerate_prompt when the user requests changes.
 6. When approved, call prompt_it.commit_prompt with final_prompt and destination.
 7. Execute/send the returned final_prompt.
@@ -158,7 +158,7 @@ For each messy request:
 [Host LLM silently writes converted_prompt]
        |
        v
-[Host Review UI shows Converted Prompt only]
+[Host Review UI shows only converted_prompt text]
        |
        +--> optional user edit
        +--> optional regenerate_prompt

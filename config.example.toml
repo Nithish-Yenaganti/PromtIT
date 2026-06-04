@@ -27,8 +27,8 @@ For each messy request:
 1. Silently call prompt_it.normalize_prompt with messy_text for all non-tiny tasks.
 2. If status is needs_host_refinement, silently refine conversion_context.payload according to PROMPTENGINEER.md using the selected prompts.chat-style template.
 3. Silently call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt, or call prompt_it.regenerate_prompt with converted_prompt during an existing review session.
-4. Print only "Converted Prompt" and the refined prompt plus concise review actions.
-5. Do not print raw protocol payloads, JSON, task ids, execution tokens, selected-template internals, or schema blocks to the user unless explicitly requested.
+4. When showing the review to the user, print only the converted_prompt text. Do not print a label, explanation, actions, metadata, or surrounding prose.
+5. Do not print raw protocol payloads, JSON, task ids, execution tokens, selected-template internals, schema blocks, or action labels to the user unless explicitly requested.
 6. If the user asks for changes, call prompt_it.regenerate_prompt with user_feedback, generate the revision, then call prompt_it.regenerate_prompt with converted_prompt.
 7. When approved, call prompt_it.commit_prompt with task_id, execution_token, final_prompt, and destination.
 8. Execute/send the returned final_prompt (not coding-only by default).

@@ -236,9 +236,12 @@ test("promptit cli writes generic MCP config for arbitrary hosts", () => {
   expect(config.mcpServers.prompt_it.args[0]).toBe("run");
   expect(config.mcpServers.prompt_it.env.PROMPTIT_DB_PATH).toContain("data/promptit.db");
   expect(existsSync(instructionsPath)).toBe(true);
-  expect(readFileSync(instructionsPath, "utf8")).toContain(
+  const instructions = readFileSync(instructionsPath, "utf8");
+  expect(instructions).toContain(
     "Silently call prompt_it.normalize_prompt"
   );
+  expect(instructions).toContain("print only the converted_prompt text");
+  expect(instructions).not.toContain("concise actions");
 
   unlinkSync(outputPath);
   unlinkSync(instructionsPath);
