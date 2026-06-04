@@ -208,6 +208,7 @@ function installClaude(): void {
 
   backupIfExists(configPath);
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  writeHostInstructions("claude");
   printSuccess("Claude", configPath);
 }
 
@@ -229,18 +230,22 @@ function uninstallHost(host: Host): void {
     backupIfExists(configPath);
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
     process.stdout.write(`Removed PromptIT from Claude config: ${configPath}\n`);
+    process.stdout.write(`Delete this instructions file if present:\n${hostInstructionsPath("claude")}\n`);
     return;
   }
   const safeHost = safeHostName(host);
   const outputPath = path.join(rootDir, `promptit.${safeHost}.mcp.json`);
   process.stdout.write(`Delete this generic config file if present:\n${outputPath}\n`);
+  process.stdout.write(`Delete this instructions file if present:\n${hostInstructionsPath(safeHost)}\n`);
 }
 
 function writeGenericHostConfig(host: string): void {
   const safeHost = safeHostName(host);
   const outputPath = path.join(rootDir, `promptit.${safeHost}.mcp.json`);
   writeFileSync(outputPath, `${JSON.stringify({ mcpServers: { prompt_it: renderMcpJsonServer() } }, null, 2)}\n`);
+  const instructionsPath = writeHostInstructions(safeHost);
   process.stdout.write(`Wrote generic PromptIT MCP config for "${host}" to:\n${outputPath}\n`);
+  process.stdout.write(`Wrote PromptIT host instructions to:\n${instructionsPath}\n`);
 }
 
 function runDoctor(): void {
@@ -253,6 +258,10 @@ function runDoctor(): void {
     ["Database path", dbPath],
     ["Codex config", existsSync(codexConfigPath()) ? `present: ${codexConfigPath()}` : "not installed"],
     ["Claude config", existsSync(claudeConfigPath()) ? `present: ${claudeConfigPath()}` : "not installed"],
+    [
+      "Claude instructions",
+      existsSync(hostInstructionsPath("claude")) ? `present: ${hostInstructionsPath("claude")}` : "not generated",
+    ],
     ["Queued sync items", String(listSyncQueueItems().length)],
   ];
   process.stdout.write("PromptIT doctor\n\n");
@@ -275,7 +284,8 @@ function printInstallPreview(host: Host): void {
     return;
   }
   const config = { mcpServers: { prompt_it: renderMcpJsonServer() } };
-  process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(config, null, 2)}\n\n`);
+  process.stdout.write(`${renderGenericHostInstructions(host)}\n`);
 }
 
 function renderCodexBlock(): string {
@@ -293,22 +303,46 @@ function renderCodexBlock(): string {
     'description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."',
     'mcp_servers = ["prompt_it"]',
     'developer_instructions = """',
-    "You are the orchestration layer only.",
-    "Follow PROMPTENGINEER.md as the single source of truth for refinement policy.",
-    "For each messy request:",
-    "0. For medium/large/ambiguous tasks, do not run web search, file edits, code execution, or any other tool before normalize_prompt.",
-    "0b. Tiny mechanical tasks may skip PromptIT.",
-    "1. Call prompt_it.normalize_prompt with messy_text.",
-    "2. If status is needs_host_refinement, use conversion_context.payload to generate converted_prompt with the host LLM.",
-    "3. Call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.",
-    "4. Show Converted Prompt and concise edit/regenerate/send actions.",
-    "5. Use prompt_it.regenerate_prompt when the user requests changes.",
-    "6. When approved, call prompt_it.commit_prompt with final_prompt and destination.",
-    "7. Execute/send the returned final_prompt.",
+    ...renderHostPolicyLines(),
     '"""',
     managedEnd,
     "",
   ].join("\n");
+}
+
+function writeHostInstructions(host: string): string {
+  const safeHost = safeHostName(host);
+  const outputPath = hostInstructionsPath(safeHost);
+  writeFileSync(outputPath, `${renderGenericHostInstructions(host)}\n`);
+  return outputPath;
+}
+
+function renderGenericHostInstructions(host: string): string {
+  return [
+    `# PromptIT Instructions for ${host}`,
+    "",
+    "Add this text to the host's custom instructions, project instructions, system prompt, or equivalent policy area.",
+    "",
+    ...renderHostPolicyLines(),
+  ].join("\n");
+}
+
+function renderHostPolicyLines(): string[] {
+  return [
+    "You are the orchestration layer only.",
+    "Use the PromptIT MCP tools before executing medium, large, risky, or ambiguous user requests.",
+    "Tiny mechanical tasks may skip PromptIT, such as a single rename, one-line typo fix, quick grep/list/check, or a simple direct answer.",
+    "For every non-tiny request:",
+    "1. Call prompt_it.normalize_prompt with messy_text set to the user's raw request.",
+    "2. If status is needs_host_refinement, use conversion_context.payload to generate converted_prompt yourself with the host LLM. Do not execute the user's task yet.",
+    "3. Call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.",
+    "4. Show the user the converted prompt and concise actions: edit, regenerate, or send.",
+    "5. If the user asks for changes, call prompt_it.regenerate_prompt with user_feedback, generate the revision, then call prompt_it.regenerate_prompt again with converted_prompt.",
+    "6. When the user approves, call prompt_it.commit_prompt with task_id, execution_token, final_prompt, and destination.",
+    "7. Execute or send only the returned final_prompt.",
+    "Never call prompts.chat improve_prompt. PromptIT uses prompts.chat only for template discovery/search; the host LLM performs refinement.",
+    "Do not expose raw protocol payloads unless the user explicitly asks for them.",
+  ];
 }
 
 function renderMcpJsonServer(): Record<string, unknown> {
@@ -372,6 +406,10 @@ function safeHostName(host: string): string {
   const safeHost = host.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!safeHost) throw new Error("Host name must contain at least one letter or number.");
   return safeHost;
+}
+
+function hostInstructionsPath(host: string): string {
+  return path.join(rootDir, `promptit.${safeHostName(host)}.instructions.md`);
 }
 
 function splitCsv(value: string): string[] {

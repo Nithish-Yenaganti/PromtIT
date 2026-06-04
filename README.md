@@ -76,7 +76,9 @@ promptit --cursor --preset writer
 promptit --host my-host --print-config
 ```
 
-`promptit --codex` updates `~/.codex/config.toml` with a managed PromptIT block. `promptit --claude` updates Claude Desktop's `claude_desktop_config.json`. Unknown hosts write a generic `promptit.<host>.mcp.json` file in this repo.
+`promptit --codex` updates `~/.codex/config.toml` with a managed PromptIT block and durable agent instructions. `promptit --claude` updates Claude Desktop's `claude_desktop_config.json` and writes `promptit.claude.instructions.md` for Claude's custom/project instructions. Unknown hosts write both `promptit.<host>.mcp.json` and `promptit.<host>.instructions.md` in this repo.
+
+For hosts that support MCP but do not let installers write custom instructions, copy the generated `promptit.<host>.instructions.md` text into that host's custom instructions, project instructions, system prompt, or equivalent policy area. MCP exposes the tools; the host instructions tell the LLM when to use them.
 
 PromptIT does not have to load every prompts.chat category. Pick what the user needs:
 

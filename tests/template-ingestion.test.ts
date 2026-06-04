@@ -201,7 +201,9 @@ test("selects expected default templates for messy prompts", () => {
 
 test("promptit cli writes generic MCP config for arbitrary hosts", () => {
   const outputPath = path.resolve("promptit.test-host.mcp.json");
+  const instructionsPath = path.resolve("promptit.test-host.instructions.md");
   if (existsSync(outputPath)) unlinkSync(outputPath);
+  if (existsSync(instructionsPath)) unlinkSync(instructionsPath);
 
   const result = spawnSync({
     cmd: ["bun", "run", "./src/cli.ts", "--test-host"],
@@ -216,8 +218,11 @@ test("promptit cli writes generic MCP config for arbitrary hosts", () => {
   expect(config.mcpServers.prompt_it.command).toBe("bun");
   expect(config.mcpServers.prompt_it.args[0]).toBe("run");
   expect(config.mcpServers.prompt_it.env.PROMPTIT_DB_PATH).toContain("data/promptit.db");
+  expect(existsSync(instructionsPath)).toBe(true);
+  expect(readFileSync(instructionsPath, "utf8")).toContain("Call prompt_it.normalize_prompt");
 
   unlinkSync(outputPath);
+  unlinkSync(instructionsPath);
 });
 
 test("promptit cli previews config and rejects unknown categories", () => {
@@ -229,6 +234,17 @@ test("promptit cli previews config and rejects unknown categories", () => {
   });
   expect(preview.exitCode).toBe(0);
   expect(preview.stdout.toString()).toContain("[mcp_servers.prompt_it]");
+  expect(preview.stdout.toString()).toContain("developer_instructions");
+
+  const genericPreview = spawnSync({
+    cmd: ["bun", "run", "./src/cli.ts", "--cursor", "--print-config"],
+    cwd: path.resolve("."),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(genericPreview.exitCode).toBe(0);
+  expect(genericPreview.stdout.toString()).toContain("mcpServers");
+  expect(genericPreview.stdout.toString()).toContain("PromptIT Instructions for cursor");
 
   const invalid = spawnSync({
     cmd: ["bun", "run", "./src/cli.ts", "sync", "--categories", "not-a-real-category", "--dry-run"],
