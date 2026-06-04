@@ -1,22 +1,15 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import os from "os";
 import path from "path";
 import { spawnSync } from "bun";
 
-const testDbPath = path.join(os.tmpdir(), `promptit-preflight-${Date.now()}.db`);
-if (existsSync(testDbPath)) rmSync(testDbPath);
-process.env.PROMPTIT_DB_PATH = testDbPath;
-
-const { initDatabase } = await import("../src/database");
 const { getPromptItToolDefinitions, handlePromptItToolCall } = await import("../src/preflight");
-
-initDatabase();
 
 test("exposes only preflight runtime tools through the MCP server", () => {
   const toolNames = getPromptItToolDefinitions().map((tool) => tool.name);
 
-  expect(toolNames).toEqual(["preflight_request", "record_preflight_outcome"]);
+  expect(toolNames).toEqual(["preflight_request"]);
   expect(toolNames).not.toContain("normalize_prompt");
   expect(toolNames).not.toContain("regenerate_prompt");
   expect(toolNames).not.toContain("commit_prompt");
@@ -74,23 +67,6 @@ test("secret-looking diffs are blocked without returning secret contents", async
   expect(payload.repo_facts.secret_findings).toBeGreaterThan(0);
   expect(raw).not.toContain("sk-proj-abcdefghijklmnopqrstuvwxyz");
   expect(raw).not.toContain("OPENAI_API_KEY=");
-});
-
-test("records aggregate preflight outcome without prompt content", async () => {
-  const result = await handlePromptItToolCall("record_preflight_outcome", {
-    risk_type: "database_migration",
-    decision: "block",
-    outcome: "blocked",
-  });
-  const payload = parseToolPayload(result);
-
-  expect(payload).toEqual({
-    protocol: "promptit.preflight.v1",
-    status: "recorded",
-    risk_type: "database_migration",
-    decision: "block",
-    outcome: "blocked",
-  });
 });
 
 test("promptit cli previews preflight MCP instructions", () => {

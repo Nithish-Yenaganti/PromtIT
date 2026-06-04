@@ -4,10 +4,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { initDatabase } from "./database";
 import { getPromptItToolDefinitions, handlePromptItToolCall } from "./preflight";
-
-initDatabase();
 
 export const promptItServer = new McpServer(
   { name: "promptit-mcp", version: "3.0.0" },

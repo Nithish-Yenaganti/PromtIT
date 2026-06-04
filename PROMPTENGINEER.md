@@ -34,14 +34,4 @@ Call PromptIT before work involving:
 2. Do not push, deploy, or perform destructive migration work after `needs_confirmation` until the user confirms.
 3. Do not show raw diffs or secret-like values from PromptIT output.
 4. Do not treat PromptIT as an LLM or prompt improver.
-5. Do not store or summarize raw user prompts in local stats.
-
-## Outcome Recording
-
-After a risky task, optionally call `record_preflight_outcome` with:
-
-- `risk_type`
-- `decision`
-- `outcome`
-
-Allowed outcomes are `accepted`, `overridden`, `completed`, and `blocked`.
+5. Do not store or summarize raw user prompts, repo facts, decisions, or outcomes.

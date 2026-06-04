@@ -1,18 +1,11 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { spawnSync } from "bun";
 import { MAX_TEXT_CHARS } from "./config";
-import { recordPreflightEvent } from "./database";
 
 type PreflightArgs = {
   request: string;
   repoPath?: string;
-};
-
-type RecordOutcomeArgs = {
-  riskType: RiskType;
-  decision: Decision;
-  outcome?: "accepted" | "overridden" | "completed" | "blocked";
 };
 
 type Decision = "skip" | "allow" | "warn" | "needs_confirmation" | "block";
@@ -186,29 +179,11 @@ export function getPromptItToolDefinitions() {
         required: ["request"],
       },
     },
-    {
-      name: "record_preflight_outcome",
-      description:
-        "Records aggregate preflight outcome stats without storing prompts, diffs, or file contents.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          risk_type: { type: "string", description: "Risk type returned by preflight_request." },
-          decision: { type: "string", description: "Decision returned by preflight_request." },
-          outcome: {
-            type: "string",
-            description: "Optional result: accepted, overridden, completed, or blocked.",
-          },
-        },
-        required: ["risk_type", "decision"],
-      },
-    },
   ];
 }
 
 export async function handlePromptItToolCall(name: string, args: unknown) {
   if (name === "preflight_request") return jsonToolResult(handlePreflightRequest(args));
-  if (name === "record_preflight_outcome") return jsonToolResult(handleRecordOutcome(args));
   throw new Error("Tool not found");
 }
 
@@ -220,8 +195,6 @@ function handlePreflightRequest(input: unknown) {
   const blockedReasons = policy.blockedWhen?.(facts, request) ?? [];
   const decision: Decision = blockedReasons.length > 0 ? "block" : policy.decision;
   const evidence = buildEvidence(request, facts, riskType, blockedReasons);
-
-  recordPreflightEvent(riskType, decision, "triggered");
 
   return {
     protocol: "promptit.preflight.v1",
@@ -247,18 +220,6 @@ function handlePreflightRequest(input: unknown) {
       secret_findings: facts.secret_findings,
     },
     host_instruction: buildHostInstruction(decision, riskType, policy.requiredChecks, evidence),
-  };
-}
-
-function handleRecordOutcome(input: unknown) {
-  const { riskType, decision, outcome } = parseRecordOutcomeArgs(input);
-  recordPreflightEvent(riskType, decision, outcome ?? "recorded");
-  return {
-    protocol: "promptit.preflight.v1",
-    status: "recorded",
-    risk_type: riskType,
-    decision,
-    outcome: outcome ?? "recorded",
   };
 }
 
@@ -378,26 +339,6 @@ function parsePreflightArgs(input: unknown): PreflightArgs {
   };
 }
 
-function parseRecordOutcomeArgs(input: unknown): RecordOutcomeArgs {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const riskTypeRaw = args.risk_type;
-  const decisionRaw = args.decision;
-  const outcomeRaw = args.outcome;
-  assertString(riskTypeRaw, "risk_type");
-  assertString(decisionRaw, "decision");
-  assertOptionalString(outcomeRaw, "outcome");
-  if (!isRiskType(riskTypeRaw)) throw new Error("risk_type is not recognized.");
-  if (!isDecision(decisionRaw)) throw new Error("decision is not recognized.");
-  if (outcomeRaw !== undefined && !["accepted", "overridden", "completed", "blocked"].includes(outcomeRaw)) {
-    throw new Error("outcome is not recognized.");
-  }
-  return {
-    riskType: riskTypeRaw,
-    decision: decisionRaw,
-    outcome: typeof outcomeRaw === "string" ? outcomeRaw as RecordOutcomeArgs["outcome"] : undefined,
-  };
-}
-
 function resolveRepoPath(input?: string): string {
   const raw = input?.trim() || process.env.PROMPTIT_TARGET_REPO?.trim() || process.cwd();
   const resolved = path.resolve(raw);
@@ -482,14 +423,6 @@ function countSecretFindings(diff: string): number {
 
 function hasWords(input: string, words: string[]): boolean {
   return words.some((word) => input.includes(word));
-}
-
-function isRiskType(value: string): value is RiskType {
-  return Object.prototype.hasOwnProperty.call(POLICIES, value);
-}
-
-function isDecision(value: string): value is Decision {
-  return ["skip", "allow", "warn", "needs_confirmation", "block"].includes(value);
 }
 
 function assertString(value: unknown, name: string): asserts value is string {

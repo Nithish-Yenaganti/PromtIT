@@ -7,9 +7,8 @@ command = "bun"
 args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
 cwd = "/YOUR/ABSOLUTE/PATH"
 
-[mcp_servers.prompt_it.env]
-PROMPTIT_DB_PATH = "/YOUR/ABSOLUTE/PATH/data/promptit.db"
 # Optional: default repo path when the host cannot pass repo_path explicitly.
+# [mcp_servers.prompt_it.env]
 # PROMPTIT_TARGET_REPO = "/YOUR/PROJECT/PATH"
 
 [agents.prompt_engineer]
@@ -25,6 +24,5 @@ Before executing requests involving deploys, pushes, database/schema changes, au
 3. If decision is warn, apply host_instruction before editing and include required checks in your work.
 4. If decision is needs_confirmation, show the user the risk summary and required checks, then wait for confirmation before dangerous actions.
 5. If decision is block, do not continue until the blocking condition is resolved.
-6. After the task, call prompt_it.record_preflight_outcome with the risk_type, decision, and outcome when useful.
 Do not use PromptIT to rewrite normal prompts. PromptIT is a safety gate, not a prompt cleaner.
 """

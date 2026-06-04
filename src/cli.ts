@@ -2,7 +2,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import os from "os";
 import path from "path";
-import { initDatabase } from "./database";
 
 type Host = "codex" | "claude" | string;
 
@@ -16,7 +15,6 @@ type CliOptions = {
 
 const rootDir = path.resolve(import.meta.dir, "..");
 const serverPath = path.join(rootDir, "src", "server.ts");
-const dbPath = path.join(rootDir, "data", "promptit.db");
 const managedStart = "# >>> PromptIT MCP managed block >>>";
 const managedEnd = "# <<< PromptIT MCP managed block <<<";
 
@@ -47,7 +45,6 @@ async function main(): Promise<void> {
 
 function runInstall(options: CliOptions, runDoctorAfter: boolean): void {
   if (!options.host) throw new Error("Host is required for install.");
-  ensureRuntimeDirs();
   if (options.printConfig || options.dryRun) {
     printInstallPreview(options.host);
   } else if (options.uninstall) {
@@ -155,13 +152,9 @@ function writeGenericHostConfig(host: string): void {
 }
 
 function runDoctor(): void {
-  ensureRuntimeDirs();
-  initDatabase();
   const checks = [
     ["Bun runtime", Bun.version ? `ok (${Bun.version})` : "missing"],
     ["Server file", existsSync(serverPath) ? "ok" : `missing: ${serverPath}`],
-    ["Database directory", existsSync(path.dirname(dbPath)) ? "ok" : `missing: ${path.dirname(dbPath)}`],
-    ["Database path", dbPath],
     ["Codex config", existsSync(codexConfigPath()) ? `present: ${codexConfigPath()}` : "not installed"],
     ["Claude config", existsSync(claudeConfigPath()) ? `present: ${claudeConfigPath()}` : "not installed"],
     [
@@ -192,9 +185,6 @@ function renderCodexBlock(): string {
     'command = "bun"',
     `args = ["run", "${escapeToml(serverPath)}"]`,
     `cwd = "${escapeToml(rootDir)}"`,
-    "",
-    "[mcp_servers.prompt_it.env]",
-    `PROMPTIT_DB_PATH = "${escapeToml(dbPath)}"`,
     "",
     "[agents.prompt_engineer]",
     'description = "Repo-aware safety preflight for risky AI coding agent workflows."',
@@ -235,7 +225,6 @@ function renderHostPolicyLines(): string[] {
     "3. If decision is warn, apply host_instruction before editing and include required checks in your work.",
     "4. If decision is needs_confirmation, show the user the risk summary and required checks, then wait for confirmation before dangerous actions.",
     "5. If decision is block, do not continue until the blocking condition is resolved.",
-    "6. After the task, call prompt_it.record_preflight_outcome with the risk_type, decision, and outcome when useful.",
     "Do not use PromptIT to rewrite normal prompts. PromptIT is a safety gate, not a prompt cleaner.",
   ];
 }
@@ -245,9 +234,6 @@ function renderMcpJsonServer(): Record<string, unknown> {
     command: "bun",
     args: ["run", serverPath],
     cwd: rootDir,
-    env: {
-      PROMPTIT_DB_PATH: dbPath,
-    },
   };
 }
 
@@ -291,10 +277,6 @@ function backupIfExists(filePath: string): void {
   if (!existsSync(filePath)) return;
   const backupPath = `${filePath}.promptit.bak`;
   writeFileSync(backupPath, readFileSync(filePath));
-}
-
-function ensureRuntimeDirs(): void {
-  mkdirSync(path.dirname(dbPath), { recursive: true });
 }
 
 function safeHostName(host: string): string {

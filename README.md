@@ -82,7 +82,6 @@ Example response:
 ## MCP Tools
 
 - `preflight_request`: classify risk, inspect repo state, and return a safety decision.
-- `record_preflight_outcome`: record aggregate outcome stats without storing prompts, diffs, or file contents.
 
 The runtime MCP surface intentionally does not expose prompt rewriting tools.
 
@@ -101,15 +100,7 @@ PromptIT does not return raw diff contents.
 
 ## Data Policy
 
-PromptIT stores only aggregate preflight stats:
-
-- risk type
-- decision
-- outcome
-- count
-- last used time
-
-PromptIT does not store raw prompts, generated prompts, file contents, diffs, or secrets.
+PromptIT is stateless by default. It does not use a database and does not store raw prompts, generated prompts, file contents, diffs, repo facts, decisions, outcomes, or secrets.
 
 ## Quick Start
 
@@ -143,7 +134,6 @@ Generated host instructions tell the agent:
 4. Apply `host_instruction` for `warn`.
 5. Ask for confirmation for `needs_confirmation`.
 6. Stop for `block`.
-7. Optionally call `record_preflight_outcome` after the task.
 
 PromptIT should stay silent for ordinary low-risk coding tasks.
 
