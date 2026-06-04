@@ -124,9 +124,11 @@ test("redacts generic secret assignments from review payloads", async () => {
   if (!textResult || textResult.type !== "text") throw new Error("Expected text tool result.");
   const payload = JSON.parse(textResult.text);
 
-  expect(payload.original_prompt).toContain("PROMPTS_API_KEY=[REDACTED_SECRET]");
-  expect(payload.original_prompt).not.toContain("super-secret-value-12345");
-  expect(payload.conversion_context.payload).toContain("PROMPTS_API_KEY=[REDACTED_SECRET]");
+  expect(payload.host_instruction).toContain("PROMPTS_API_KEY=[REDACTED_SECRET]");
+  expect(payload.host_instruction).not.toContain("super-secret-value-12345");
+  expect(payload.original_prompt).toBeUndefined();
+  expect(payload.conversion_context).toBeUndefined();
+  expect(payload.selected_template).toBeUndefined();
 });
 
 test("review payloads do not expose user-visible action button hints", async () => {
@@ -140,6 +142,18 @@ test("review payloads do not expose user-visible action button hints", async () 
   expect(firstPayload.actions).toBeUndefined();
   expect(firstPayload.tools).toBeUndefined();
   expect(firstPayload.plan).toBeUndefined();
+  expect(firstPayload.original_prompt).toBeUndefined();
+  expect(firstPayload.revision_count).toBeUndefined();
+  expect(firstPayload.selected_template).toBeUndefined();
+  expect(firstPayload.conversion_context).toBeUndefined();
+  expect(firstPayload.token_ttl_seconds).toBeUndefined();
+  expect(firstPayload.notices).toBeUndefined();
+  expect(firstPayload.host_instruction).toContain("MESSY_TEXT:");
+  expect(firstPayload.host_instruction).toContain("TEMPLATE_CITATION:");
+  expect(firstPayload.host_instruction).not.toContain("intent_type:");
+  expect(firstPayload.host_instruction).not.toContain("domain:");
+  expect(firstPayload.host_instruction).not.toContain("task_type:");
+  expect(firstPayload.host_instruction).not.toContain("score:");
 
   const second = await handlePromptItToolCall("normalize_prompt", {
     messy_text: "make this prompt cleaner",
@@ -187,6 +201,35 @@ test("review payloads do not expose user-visible action button hints", async () 
     final_prompt: "Rewrite the request into a concise prompt.",
     template_citation: secondPayload.template_citation,
   });
+});
+
+test("regeneration prompt requests expose only a host instruction plus session token", async () => {
+  const first = await handlePromptItToolCall("normalize_prompt", {
+    messy_text: "make this prompt cleaner",
+  });
+  const firstText = first.content[0];
+  if (!firstText || firstText.type !== "text") throw new Error("Expected text tool result.");
+  const firstPayload = JSON.parse(firstText.text);
+
+  const regen = await handlePromptItToolCall("regenerate_prompt", {
+    task_id: firstPayload.task_id,
+    execution_token: firstPayload.execution_token,
+    user_feedback: "make it shorter",
+  });
+  const regenText = regen.content[0];
+  if (!regenText || regenText.type !== "text") throw new Error("Expected text tool result.");
+  const regenPayload = JSON.parse(regenText.text);
+
+  expect(regenPayload.protocol).toBe("promptit.review.v1");
+  expect(regenPayload.status).toBe("needs_regenerated_prompt");
+  expect(regenPayload.task_id).toBe(firstPayload.task_id);
+  expect(regenPayload.execution_token).toBe(firstPayload.execution_token);
+  expect(regenPayload.host_instruction).toContain("USER_FEEDBACK:");
+  expect(regenPayload.original_prompt).toBeUndefined();
+  expect(regenPayload.selected_template).toBeUndefined();
+  expect(regenPayload.conversion_context).toBeUndefined();
+  expect(regenPayload.regeneration_instruction).toBeUndefined();
+  expect(regenPayload.notices).toBeUndefined();
 });
 
 test("validates required template fields and quality score", () => {

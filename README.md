@@ -134,7 +134,7 @@ For each messy request:
 0. For medium/large/ambiguous tasks, do not run web search, file edits, code execution, or any other tool before normalize_prompt.
 0b. Tiny mechanical tasks may skip PromptIT.
 1. Silently call prompt_it.normalize_prompt with messy_text.
-2. If status is needs_host_refinement, silently use conversion_context.payload to generate converted_prompt with the host LLM.
+2. If status is needs_host_refinement, silently use host_instruction to generate converted_prompt with the host LLM.
 3. Silently call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.
 4. When showing the review to the user, print only the converted_prompt text and nothing else.
 5. Use prompt_it.regenerate_prompt when the user requests changes.

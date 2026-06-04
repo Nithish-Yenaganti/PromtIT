@@ -149,7 +149,7 @@ function handleNormalizePrompt(input: unknown) {
   const existingSession =
     taskId && executionToken ? validateSession(taskId, executionToken) : undefined;
   const session = existingSession ?? createSession();
-  const { sensitiveNotice, conversionInput, templateMatch } = buildConversionContext(
+  const { conversionInput, templateMatch } = buildConversionContext(
     messyText,
     existingSession?.templateMatch
   );
@@ -168,17 +168,10 @@ function handleNormalizePrompt(input: unknown) {
   return jsonToolResult(
     buildReviewPayload({
       session,
-      originalPrompt: sanitizedRaw.text,
       convertedPrompt: sanitizedConverted?.text,
       status: convertedPrompt ? "ready_for_review" : "needs_host_refinement",
       conversionInput,
       templateMatch,
-      notices: [
-        sensitiveNotice,
-        sanitizedConverted?.redacted
-          ? "Potential secrets were redacted from converted_prompt."
-          : "",
-      ],
     })
   );
 }
@@ -232,16 +225,10 @@ function handleRegeneratePrompt(input: unknown) {
   return jsonToolResult(
     buildReviewPayload({
       session,
-      originalPrompt: session.rawText,
       convertedPrompt: session.currentPrompt,
       status: sanitizedConverted ? "ready_for_review" : "needs_regenerated_prompt",
       regenerationInstruction,
       templateMatch: session.templateMatch,
-      notices: [
-        sanitizedConverted?.redacted
-          ? "Potential secrets were redacted from converted_prompt."
-          : "",
-      ],
     })
   );
 }
@@ -295,29 +282,18 @@ function handleCommitPrompt(input: unknown) {
 }
 
 function buildConversionContext(messyText: string, existingMatch?: TemplateMatch): {
-  sensitiveNotice: string;
   conversionInput: string;
   templateMatch: TemplateMatch;
 } {
   const sanitizedMessy = redactSensitiveText(messyText);
   const templateMatch = existingMatch ?? selectBestTemplate(sanitizedMessy.text);
-  const sensitiveNotice = sanitizedMessy.redacted
-    ? "Notice: potential secrets were redacted before host-side refinement."
-    : "";
   const conversionInput = [
     "MESSY_TEXT:",
     sanitizedMessy.text,
     "",
-    "SELECTED_TEMPLATE:",
-    `id: ${templateMatch.template.id}`,
-    `name: ${templateMatch.template.name}`,
+    "TEMPLATE_CITATION:",
     `source: ${templateMatch.template.source}`,
-    `intent_type: ${templateMatch.template.intent_type}`,
-    `domain: ${templateMatch.template.domain}`,
-    `task_type: ${templateMatch.template.task_type}`,
-    `seniority_level: ${templateMatch.template.seniority_level}`,
-    `output_style: ${templateMatch.template.output_style}`,
-    `tags: ${templateMatch.template.tags}`,
+    `name: ${templateMatch.template.name}`,
     "",
     "TEMPLATE_INSTRUCTIONS:",
     templateMatch.template.instructions,
@@ -330,7 +306,6 @@ function buildConversionContext(messyText: string, existingMatch?: TemplateMatch
   ].join("\n");
 
   return {
-    sensitiveNotice,
     conversionInput,
     templateMatch,
   };
@@ -338,16 +313,12 @@ function buildConversionContext(messyText: string, existingMatch?: TemplateMatch
 
 function buildReviewPayload(args: {
   session: RefinementSession;
-  originalPrompt: string;
   convertedPrompt?: string;
   status: ReviewStatus;
   conversionInput?: string;
   templateMatch?: TemplateMatch;
-  notices?: string[];
   regenerationInstruction?: string;
 }) {
-  const includeHostRefinementMetadata = Boolean(args.conversionInput);
-
   if (args.status === "ready_for_review" && args.convertedPrompt) {
     return {
       protocol: "promptit.review.v1",
@@ -362,35 +333,7 @@ function buildReviewPayload(args: {
     status: args.status,
     task_id: args.session.taskId,
     execution_token: args.session.executionToken,
-    token_ttl_seconds: Math.floor(
-      Math.max(0, args.session.expiresAtMs - Date.now()) / 1000
-    ),
-    original_prompt: args.originalPrompt,
-    converted_prompt: args.convertedPrompt ?? null,
-    revision_count: args.session.revisionCount,
-    selected_template:
-      includeHostRefinementMetadata && args.templateMatch
-        ? {
-          id: args.templateMatch.template.id,
-          name: args.templateMatch.template.name,
-          source: args.templateMatch.template.source,
-          intent_type: args.templateMatch.template.intent_type,
-          domain: args.templateMatch.template.domain,
-          task_type: args.templateMatch.template.task_type,
-          score: Number(args.templateMatch.score.toFixed(4)),
-          reasons: args.templateMatch.reasons,
-        }
-        : undefined,
-    conversion_context: args.conversionInput
-      ? {
-          payload: args.conversionInput,
-          selected_template: args.templateMatch?.template ?? null,
-          note:
-            "Host LLM should produce converted_prompt from this payload, then call normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.",
-        }
-      : undefined,
-    regeneration_instruction: args.regenerationInstruction,
-    notices: args.notices?.filter(Boolean).length ? args.notices.filter(Boolean) : undefined,
+    host_instruction: args.conversionInput ?? args.regenerationInstruction ?? "",
   };
 }
 
