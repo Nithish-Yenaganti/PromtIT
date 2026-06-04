@@ -1,6 +1,7 @@
 # Render this snippet with `bun run config:codex` or
 # `bash scripts/render-codex-config.sh`, then add it to your MCP host config.
 # This repository intentionally does not commit active project-level MCP install files.
+# PromptIT is stateless: no database, no prompt history, and no stored repo facts.
 
 [mcp_servers.prompt_it]
 command = "bun"

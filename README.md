@@ -61,6 +61,29 @@ src/policies/
 
 PromptIT does not use Markdown policy files for enforcement. Markdown is only documentation; the executable safety decisions stay in typed code so they can be tested and kept deterministic.
 
+To change an existing policy, edit the matching file in `src/policies/` and update the tests that cover the expected decision. To add a new risk type, add it to `src/policies/types.ts`, create a new policy file, export it from `src/policies/index.ts`, and update the classifier in `src/preflight.ts`.
+
+Each policy controls:
+
+- `riskType`: the stable machine-readable risk id.
+- `severity`: `low`, `medium`, `high`, or `critical`.
+- `decision`: `skip`, `allow`, `warn`, `needs_confirmation`, or `block`.
+- `requiredChecks`: the checks the host should follow before risky work.
+- `blockedWhen`: optional hard-stop logic based on live repo facts.
+
+## Project Structure
+
+```text
+src/server.ts       # MCP stdio server and tool registration
+src/preflight.ts    # repo inspection, risk classification, response building
+src/policies/       # executable policy definitions
+src/cli.ts          # one-command host installer and generated instructions
+src/config.ts       # small runtime constants
+tests/              # behavior and policy-registry tests
+```
+
+There is no prompt-refiner layer, no prompts.chat ingestion, no database module, and no `PROMPTENGINEER.md`. PromptIT is intentionally a narrow safety preflight tool.
+
 ## Runtime Flow
 
 ```text
@@ -105,6 +128,17 @@ Example response:
 
 The runtime MCP surface intentionally does not expose prompt rewriting tools.
 
+Tool input:
+
+```json
+{
+  "request": "deploy this and push it",
+  "repo_path": "/absolute/path/to/repo"
+}
+```
+
+`repo_path` is optional. If the host cannot pass it, PromptIT falls back to `PROMPTIT_TARGET_REPO` and then the current working directory.
+
 ## Repo Facts Inspected
 
 - Git branch
@@ -121,6 +155,8 @@ PromptIT does not return raw diff contents.
 ## Data Policy
 
 PromptIT is stateless by default. It does not use a database and does not store raw prompts, generated prompts, file contents, diffs, repo facts, decisions, outcomes, or secrets.
+
+Secret scanning only counts secret-looking matches in tracked git diffs. PromptIT never returns the matched secret text.
 
 ## Quick Start
 
