@@ -182,13 +182,13 @@ PromptIT does not run a generative model, does not run embeddings, does not stor
 
 ## Template Ingestion
 
-On server startup, PromptIT starts a best-effort prompts.chat bootstrap sync in the background. It tries to import 1 template from each known public prompts.chat category; if prompts.chat is slow or rate-limited, the MCP server still starts and falls back to local/default templates.
+PromptIT does not call prompts.chat during `normalize_prompt`, and the MCP server does not bootstrap templates on startup. Runtime template selection uses the local SQLite cache plus built-in defaults, while ingestion stays in explicit setup/sync commands.
 
 Run `promptit setup` for the one-command local setup flow. Run `promptit sync --preset developer --limit 1`, or `bun run prompts:chat:sync -- --bootstrap --templates-per-category 1`, to manually retry template setup. Run `promptit sync --categories coding --limit 3`, or `bun run prompts:chat:sync -- --dry-run`, to search targeted prompts.chat categories and import valid template metadata into SQLite. The sync defaults to `https://prompts.chat/api/mcp`; set `PROMPTS_API_KEY` if your prompts.chat access requires auth.
 
 PromptIT must not call prompts.chat `improve_prompt`. prompts.chat is used for template discovery/search only; the host LLM performs refinement and PromptIT wraps that result in the review/approval flow.
 
-PromptIT should not aggressively mirror all prompts.chat prompts. It uses light category bootstrap, stores derived routing/refinement metadata, and keeps full prompt refinement work inside the host LLM. As users approve and execute prompts, PromptIT stores category counters only; repeated usage can trigger small background syncs for that category.
+PromptIT should not aggressively mirror all prompts.chat prompts. It uses light setup-time category bootstrap, stores derived routing/refinement metadata, and keeps full prompt refinement work inside the host LLM. As users approve and execute prompts, PromptIT stores category counters only; repeated usage can trigger small background syncs for that category.
 
 For security, custom `server_url` values are rejected unless they use HTTPS and match `https://prompts.chat/api/mcp`, `PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS`, or `PROMPTIT_ALLOWED_MCP_ORIGINS`.
 

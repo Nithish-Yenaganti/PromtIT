@@ -4,10 +4,7 @@ import {
   MAX_TEXT_CHARS,
   parsePositiveNumberEnv,
 } from "./config";
-import {
-  shouldSyncCategoryMore,
-  syncPromptsChatForCategory,
-} from "./promptsChatSync";
+import { scheduleAdaptiveCategorySync } from "./adaptiveSync";
 import {
   recordTemplateCategoryStat,
   recordTemplateStat,
@@ -579,25 +576,6 @@ function parseCommitArgs(input: unknown): CommitArgs {
     finalPrompt: typeof finalPromptRaw === "string" ? finalPromptRaw : undefined,
     destination: typeof destinationRaw === "string" ? destinationRaw : undefined,
   };
-}
-
-function scheduleAdaptiveCategorySync(template: TemplateMatch["template"] | undefined): void {
-  if (!template) return;
-  const category = templateAdaptiveCategory(template);
-  if (!shouldSyncCategoryMore(category)) return;
-
-  syncPromptsChatForCategory(category).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`PromptIT adaptive prompts.chat sync skipped: ${message}\n`);
-  });
-}
-
-function templateAdaptiveCategory(template: TemplateMatch["template"]): string {
-  const domain = template.domain.trim().toLowerCase();
-  if (domain === "software") return "coding";
-  if (domain === "communication") return "writing";
-  if (domain === "architecture") return "business-strategy";
-  return domain || template.intent_type;
 }
 
 function assertString(value: unknown, name: string): asserts value is string {

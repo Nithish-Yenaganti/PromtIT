@@ -29,6 +29,15 @@ test("exposes only runtime review tools through the MCP server", () => {
   expect(toolNames).not.toContain("bootstrap_prompts_chat");
 });
 
+test("keeps runtime server and refiner decoupled from prompts.chat ingestion", () => {
+  const serverSource = readFileSync(path.resolve("src/server.ts"), "utf8");
+  const refinerSource = readFileSync(path.resolve("src/refiner.ts"), "utf8");
+
+  expect(serverSource).not.toContain("./promptsChatSync");
+  expect(refinerSource).not.toContain("./promptsChatSync");
+  expect(refinerSource).toContain("./adaptiveSync");
+});
+
 test("normalizes prompts.chat prompt content into a TemplateRecord", () => {
   const template = normalizePromptToTemplate(
     {
