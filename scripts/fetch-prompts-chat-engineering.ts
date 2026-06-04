@@ -2,6 +2,7 @@ import { bootstrapPromptsChatTemplates, syncPromptsChatTemplates } from "../src/
 
 function parseArgs(argv: string[]): {
   keywords?: string[];
+  category?: string;
   limit?: number;
   dryRun?: boolean;
   serverUrl?: string;
@@ -11,6 +12,7 @@ function parseArgs(argv: string[]): {
 } {
   const parsed: {
     keywords?: string[];
+    category?: string;
     limit?: number;
     dryRun?: boolean;
     serverUrl?: string;
@@ -28,6 +30,11 @@ function parseArgs(argv: string[]): {
         .split(",")
         .map((keyword) => keyword.trim())
         .filter(Boolean);
+      i += 1;
+    } else if (arg === "--category") {
+      const value = argv[i + 1];
+      if (!value) throw new Error("--category requires a prompts.chat category slug.");
+      parsed.category = value.trim();
       i += 1;
     } else if (arg === "--limit") {
       const value = Number(argv[i + 1]);

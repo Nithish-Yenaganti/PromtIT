@@ -13,6 +13,7 @@ import {
   upsertTemplates,
   type TemplateRecord,
 } from "./database";
+import { PROMPTS_CHAT_PUBLIC_CATEGORIES } from "./promptsChatCategories";
 
 const DEFAULT_PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp";
 const ALLOWED_MCP_URL_ENV = "PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS";
@@ -50,6 +51,7 @@ export type PromptsChatSearchPrompt = {
 
 export type SyncPromptsChatOptions = {
   keywords?: string[];
+  category?: string;
   limit?: number;
   dryRun?: boolean;
   serverUrl?: string;
@@ -122,28 +124,7 @@ const DEFAULT_KEYWORDS = [
   "clear writing",
 ];
 
-export const PROMPTS_CHAT_BOOTSTRAP_CATEGORIES = [
-  {
-    category: "coding",
-    keywords: ["software implementation", "typescript build", "bug fix"],
-  },
-  {
-    category: "review",
-    keywords: ["code review", "bug review", "security review"],
-  },
-  {
-    category: "planning",
-    keywords: ["mcp architecture", "cloud architecture", "local architecture"],
-  },
-  {
-    category: "research",
-    keywords: ["technical research", "compare latest tools", "cite sources"],
-  },
-  {
-    category: "writing",
-    keywords: ["clear writing", "two paragraph explanation", "documentation writing"],
-  },
-] as const;
+export const PROMPTS_CHAT_BOOTSTRAP_CATEGORIES = PROMPTS_CHAT_PUBLIC_CATEGORIES;
 
 const DEFAULT_BOOTSTRAP_TEMPLATES_PER_CATEGORY = 3;
 const DEFAULT_ADAPTIVE_SYNC_LIMIT = 3;
@@ -295,7 +276,7 @@ export async function syncPromptsChatTemplates(
 
   await client.connect(transport);
   try {
-    const searchResults = await searchPrompts(client, keywords, limit);
+    const searchResults = await searchPrompts(client, keywords, limit, options.category);
     const prompts = searchResults.length > 0 ? searchResults : await listPrompts(client);
     const matched =
       searchResults.length > 0
@@ -394,6 +375,7 @@ export async function bootstrapPromptsChatTemplates(
     try {
       const result = await syncPromptsChatTemplates({
         keywords: [...config.keywords],
+        category: config.category,
         limit: templatesPerCategory,
         dryRun,
         serverUrl: options.serverUrl,
@@ -440,6 +422,7 @@ export async function syncPromptsChatForCategory(category: string): Promise<Sync
   const keywords = config?.keywords ?? [category];
   const result = await syncPromptsChatTemplates({
     keywords: [...keywords],
+    category: config?.category,
     limit: DEFAULT_ADAPTIVE_SYNC_LIMIT,
   });
   if (result.imported_count > 0) {
@@ -679,7 +662,8 @@ async function listPrompts(client: Client): Promise<PromptsChatPromptItem[]> {
 async function searchPrompts(
   client: Client,
   queries: string[],
-  limit?: number
+  limit?: number,
+  category?: string
 ): Promise<PromptsChatSearchPrompt[]> {
   const results: PromptsChatSearchPrompt[] = [];
   const seen = new Set<string>();
@@ -694,6 +678,7 @@ async function searchPrompts(
           arguments: {
             query,
             limit: perQueryLimit,
+            ...(category ? { category } : {}),
           },
         },
       },

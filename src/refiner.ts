@@ -40,6 +40,7 @@ type CommitArgs = {
 
 type SyncPromptsChatArgs = {
   keywords?: string[];
+  category?: string;
   limit?: number;
   dryRun?: boolean;
   serverUrl?: string;
@@ -174,6 +175,11 @@ export function getPromptItToolDefinitions() {
             type: "number",
             description: "Optional maximum number of matched prompts to fetch and normalize.",
           },
+          category: {
+            type: "string",
+            description:
+              "Optional prompts.chat category slug to filter search_prompts, for example coding or technical-writing.",
+          },
           dry_run: {
             type: "boolean",
             description: "When true, validates and summarizes templates without writing to SQLite.",
@@ -226,9 +232,10 @@ export async function handlePromptItToolCall(name: string, args: unknown) {
 }
 
 async function handleSyncPromptsChat(input: unknown) {
-  const { keywords, limit, dryRun, serverUrl } = parseSyncPromptsChatArgs(input);
+  const { keywords, category, limit, dryRun, serverUrl } = parseSyncPromptsChatArgs(input);
   const result = await syncPromptsChatTemplates({
     keywords,
+    category,
     limit,
     dryRun,
     serverUrl,
@@ -683,6 +690,7 @@ function parseSyncPromptsChatArgs(input: unknown): SyncPromptsChatArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const keywordsRaw = args.keywords;
   const limitRaw = args.limit;
+  const categoryRaw = args.category;
   const dryRunRaw = args.dry_run;
   const serverUrlRaw = args.server_url;
 
@@ -710,10 +718,12 @@ function parseSyncPromptsChatArgs(input: unknown): SyncPromptsChatArgs {
   if (dryRunRaw !== undefined && typeof dryRunRaw !== "boolean") {
     throw new Error("dry_run must be a boolean when provided.");
   }
+  assertOptionalString(categoryRaw, "category");
   assertOptionalString(serverUrlRaw, "server_url");
 
   return {
     keywords,
+    category: typeof categoryRaw === "string" ? categoryRaw : undefined,
     limit: typeof limitRaw === "number" ? Math.floor(limitRaw) : undefined,
     dryRun: typeof dryRunRaw === "boolean" ? dryRunRaw : undefined,
     serverUrl: typeof serverUrlRaw === "string" ? serverUrlRaw : undefined,
@@ -749,13 +759,21 @@ function parseBootstrapPromptsChatArgs(input: unknown): BootstrapPromptsChatArgs
 
 function scheduleAdaptiveCategorySync(template: TemplateMatch["template"] | undefined): void {
   if (!template) return;
-  const category = template.task_type === "review" ? "review" : template.intent_type;
+  const category = templateAdaptiveCategory(template);
   if (!shouldSyncCategoryMore(category)) return;
 
   syncPromptsChatForCategory(category).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`PromptIT adaptive prompts.chat sync skipped: ${message}\n`);
   });
+}
+
+function templateAdaptiveCategory(template: TemplateMatch["template"]): string {
+  const domain = template.domain.trim().toLowerCase();
+  if (domain === "software") return "coding";
+  if (domain === "communication") return "writing";
+  if (domain === "architecture") return "business-strategy";
+  return domain || template.intent_type;
 }
 
 function assertString(value: unknown, name: string): asserts value is string {

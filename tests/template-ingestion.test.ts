@@ -14,6 +14,7 @@ const {
   resolvePromptsChatMcpUrl,
   validateTemplateRecord,
 } = await import("../src/promptsChatSync");
+const { PROMPTS_CHAT_PUBLIC_CATEGORIES } = await import("../src/promptsChatCategories");
 const { handlePromptItToolCall } = await import("../src/refiner");
 const { selectBestTemplate } = await import("../src/templates");
 
@@ -83,6 +84,17 @@ test("allows only default or explicitly allowlisted prompts.chat MCP URLs", () =
     "https://example.com/api/mcp"
   );
   delete process.env.PROMPTIT_ALLOWED_MCP_ORIGINS;
+});
+
+test("bootstraps across prompts.chat public category slugs", () => {
+  const slugs = PROMPTS_CHAT_PUBLIC_CATEGORIES.map((item) => item.category);
+
+  expect(slugs.length).toBeGreaterThan(40);
+  expect(slugs).toContain("coding");
+  expect(slugs).toContain("technical-writing");
+  expect(slugs).toContain("image-generation");
+  expect(slugs).toContain("research-analysis");
+  expect(slugs).toContain("startup-entrepreneurship");
 });
 
 test("redacts generic secret assignments from review payloads", async () => {

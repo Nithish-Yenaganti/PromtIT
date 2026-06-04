@@ -7,6 +7,7 @@ import {
   type TemplateStats,
   type TemplateStatsEvent,
 } from "./database";
+import { PROMPTS_CHAT_CATEGORY_SLUGS } from "./promptsChatCategories";
 
 export type TemplateMatch = {
   template: TemplateRecord;
@@ -98,7 +99,12 @@ export function recordTemplateCategoryStat(
 }
 
 function templateUsageCategory(template: TemplateRecord): string {
-  return template.task_type === "review" ? "review" : template.intent_type;
+  const domain = template.domain.trim().toLowerCase();
+  if (PROMPTS_CHAT_CATEGORY_SLUGS.has(domain)) return domain;
+  if (domain === "software") return "coding";
+  if (domain === "communication") return "writing";
+  if (domain === "architecture") return "business-strategy";
+  return template.intent_type;
 }
 
 function scoreTemplate(
