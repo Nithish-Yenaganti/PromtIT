@@ -255,3 +255,16 @@ test("promptit cli previews config and rejects unknown categories", () => {
   expect(invalid.exitCode).toBe(1);
   expect(invalid.stderr.toString()).toContain("Unknown prompts.chat category");
 });
+
+test("promptit setup previews codex config by default", () => {
+  const setupPreview = spawnSync({
+    cmd: ["bun", "run", "./src/cli.ts", "setup", "--print-config"],
+    cwd: path.resolve("."),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  expect(setupPreview.exitCode).toBe(0);
+  expect(setupPreview.stdout.toString()).toContain("[mcp_servers.prompt_it]");
+  expect(setupPreview.stdout.toString()).toContain("developer_instructions");
+});

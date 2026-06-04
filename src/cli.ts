@@ -56,11 +56,22 @@ async function main(): Promise<void> {
     await runSync(options);
     return;
   }
-
-  if (!options.host) {
-    throw new Error("Use --codex, --claude, --host <name>, doctor, categories, or sync.");
+  if (command === "setup") {
+    options.host ??= "codex";
+    options.preset ??= "developer";
+    await runInstall(options, true);
+    return;
   }
 
+  if (!options.host) {
+    throw new Error("Use setup, --codex, --claude, --host <name>, doctor, categories, or sync.");
+  }
+
+  await runInstall(options, false);
+}
+
+async function runInstall(options: CliOptions, runDoctorAfter: boolean): Promise<void> {
+  if (!options.host) throw new Error("Host is required for install.");
   ensureRuntimeDirs();
   if (options.printConfig || options.dryRun) {
     printInstallPreview(options.host);
@@ -76,6 +87,10 @@ async function main(): Promise<void> {
 
   if (!options.uninstall && !options.printConfig) {
     await maybeBootstrapSelectedCategories(options);
+  }
+  if (runDoctorAfter && !options.dryRun && !options.printConfig) {
+    process.stdout.write("\n");
+    runDoctor();
   }
 }
 
@@ -476,6 +491,8 @@ function printHelp(): void {
       "PromptIT MCP installer",
       "",
       "Install:",
+      "  promptit setup",
+      "  promptit setup --claude --preset writer",
       "  promptit --codex --preset developer",
       "  promptit --claude --categories coding,technical-writing",
       "  promptit --host my-host --print-config",

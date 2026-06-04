@@ -61,7 +61,7 @@ MCP gives PromptIT a clean tool boundary. The server can select templates, retur
 
 ```bash
 bun install
-bun run promptit -- --codex --preset developer
+bun run promptit -- setup
 bun run start
 ```
 
@@ -70,6 +70,8 @@ bun run start
 PromptIT ships as a stdio MCP server. After installing dependencies, use the `promptit` installer command for your MCP host:
 
 ```bash
+promptit setup
+promptit setup --claude --preset writer
 promptit --codex --preset developer
 promptit --claude --categories coding,technical-writing
 promptit --cursor --preset writer
@@ -95,7 +97,7 @@ Available presets are `developer`, `writer`, `business`, `creative`, `productivi
 If you do not have the binary linked globally yet, run the same installer through Bun:
 
 ```bash
-bun run promptit -- --codex --preset developer
+bun run promptit -- setup
 bun run promptit -- --claude --categories coding,technical-writing
 ```
 
