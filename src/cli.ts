@@ -348,15 +348,15 @@ function renderHostPolicyLines(): string[] {
     "Use the PromptIT MCP tools before executing medium, large, risky, or ambiguous user requests.",
     "Tiny mechanical tasks may skip PromptIT, such as a single rename, one-line typo fix, quick grep/list/check, or a simple direct answer.",
     "For every non-tiny request:",
-    "1. Call prompt_it.normalize_prompt with messy_text set to the user's raw request.",
-    "2. If status is needs_host_refinement, use conversion_context.payload to generate converted_prompt yourself with the host LLM. Do not execute the user's task yet.",
-    "3. Call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.",
-    "4. Show the user the converted prompt and concise actions: edit, regenerate, or send.",
+    "1. Silently call prompt_it.normalize_prompt with messy_text set to the user's raw request.",
+    "2. If status is needs_host_refinement, silently use conversion_context.payload to generate converted_prompt yourself with the host LLM. Do not execute the user's task yet.",
+    "3. Silently call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.",
+    "4. Show the user only a clean \"Converted Prompt\" review plus concise actions: edit, regenerate, or send.",
     "5. If the user asks for changes, call prompt_it.regenerate_prompt with user_feedback, generate the revision, then call prompt_it.regenerate_prompt again with converted_prompt.",
     "6. When the user approves, call prompt_it.commit_prompt with task_id, execution_token, final_prompt, and destination.",
     "7. Execute or send only the returned final_prompt.",
     "Never call prompts.chat improve_prompt. PromptIT uses prompts.chat only for template discovery/search; the host LLM performs refinement.",
-    "Do not expose raw protocol payloads unless the user explicitly asks for them.",
+    "Do not show raw protocol payloads, JSON, task ids, execution tokens, selected-template internals, or schema blocks unless the user explicitly asks for them.",
   ];
 }
 

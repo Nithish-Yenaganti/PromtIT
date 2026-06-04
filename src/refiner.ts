@@ -5,10 +5,8 @@ import {
   parsePositiveNumberEnv,
 } from "./config";
 import {
-  bootstrapPromptsChatTemplates,
   shouldSyncCategoryMore,
   syncPromptsChatForCategory,
-  syncPromptsChatTemplates,
 } from "./promptsChatSync";
 import {
   recordTemplateCategoryStat,
@@ -36,21 +34,6 @@ type CommitArgs = {
   executionToken: string;
   finalPrompt?: string;
   destination?: string;
-};
-
-type SyncPromptsChatArgs = {
-  keywords?: string[];
-  category?: string;
-  limit?: number;
-  dryRun?: boolean;
-  serverUrl?: string;
-};
-
-type BootstrapPromptsChatArgs = {
-  templatesPerCategory?: number;
-  dryRun?: boolean;
-  serverUrl?: string;
-  force?: boolean;
 };
 
 type RefinementSession = {
@@ -156,69 +139,6 @@ export function getPromptItToolDefinitions() {
         required: ["task_id", "execution_token"],
       },
     },
-    {
-      name: "sync_prompts_chat",
-      description:
-        "Fetches prompts.chat templates, normalizes them into PromptIT template records, validates them, dedupes them, and upserts valid templates into the local SQLite cache.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          keywords: {
-            oneOf: [
-              { type: "array", items: { type: "string" } },
-              { type: "string" },
-            ],
-            description:
-              "Optional keywords used to filter prompts before import. Defaults to PROMPTS_CHAT_KEYWORDS or PromptIT's built-in template keywords.",
-          },
-          limit: {
-            type: "number",
-            description: "Optional maximum number of matched prompts to fetch and normalize.",
-          },
-          category: {
-            type: "string",
-            description:
-              "Optional prompts.chat category slug to filter search_prompts, for example coding or technical-writing.",
-          },
-          dry_run: {
-            type: "boolean",
-            description: "When true, validates and summarizes templates without writing to SQLite.",
-          },
-          server_url: {
-            type: "string",
-            description:
-              "Optional prompts.chat MCP URL. Defaults to PROMPTS_CHAT_MCP_URL or https://prompts.chat/api/mcp.",
-          },
-        },
-      },
-    },
-    {
-      name: "bootstrap_prompts_chat",
-      description:
-        "Seeds PromptIT with a small prompts.chat starter set: 1 template per public category by default, plus optional forced retry.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          templates_per_category: {
-            type: "number",
-            description: "Templates to import per category. Defaults to 1.",
-          },
-          dry_run: {
-            type: "boolean",
-            description: "When true, validates and summarizes without writing to SQLite.",
-          },
-          server_url: {
-            type: "string",
-            description:
-              "Optional prompts.chat MCP URL. Must be HTTPS and allowed by PromptIT URL allowlist.",
-          },
-          force: {
-            type: "boolean",
-            description: "When true, sync categories even if they were already bootstrapped.",
-          },
-        },
-      },
-    },
   ];
 }
 
@@ -226,32 +146,7 @@ export async function handlePromptItToolCall(name: string, args: unknown) {
   if (name === "normalize_prompt") return handleNormalizePrompt(args);
   if (name === "regenerate_prompt") return handleRegeneratePrompt(args);
   if (name === "commit_prompt") return handleCommitPrompt(args);
-  if (name === "sync_prompts_chat") return handleSyncPromptsChat(args);
-  if (name === "bootstrap_prompts_chat") return handleBootstrapPromptsChat(args);
   throw new Error("Tool not found");
-}
-
-async function handleSyncPromptsChat(input: unknown) {
-  const { keywords, category, limit, dryRun, serverUrl } = parseSyncPromptsChatArgs(input);
-  const result = await syncPromptsChatTemplates({
-    keywords,
-    category,
-    limit,
-    dryRun,
-    serverUrl,
-  });
-  return jsonToolResult(result);
-}
-
-async function handleBootstrapPromptsChat(input: unknown) {
-  const { templatesPerCategory, dryRun, serverUrl, force } = parseBootstrapPromptsChatArgs(input);
-  const result = await bootstrapPromptsChatTemplates({
-    templatesPerCategory,
-    dryRun,
-    serverUrl,
-    force,
-  });
-  return jsonToolResult(result);
 }
 
 function handleNormalizePrompt(input: unknown) {
@@ -683,77 +578,6 @@ function parseCommitArgs(input: unknown): CommitArgs {
     executionToken: executionTokenRaw,
     finalPrompt: typeof finalPromptRaw === "string" ? finalPromptRaw : undefined,
     destination: typeof destinationRaw === "string" ? destinationRaw : undefined,
-  };
-}
-
-function parseSyncPromptsChatArgs(input: unknown): SyncPromptsChatArgs {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const keywordsRaw = args.keywords;
-  const limitRaw = args.limit;
-  const categoryRaw = args.category;
-  const dryRunRaw = args.dry_run;
-  const serverUrlRaw = args.server_url;
-
-  let keywords: string[] | undefined;
-  if (typeof keywordsRaw === "string") {
-    keywords = keywordsRaw
-      .split(",")
-      .map((keyword) => keyword.trim())
-      .filter(Boolean);
-  } else if (Array.isArray(keywordsRaw)) {
-    if (!keywordsRaw.every((keyword) => typeof keyword === "string" && keyword.trim())) {
-      throw new Error("keywords must contain only non-empty strings.");
-    }
-    keywords = keywordsRaw.map((keyword) => keyword.trim());
-  } else if (keywordsRaw !== undefined) {
-    throw new Error("keywords must be a string or an array of strings when provided.");
-  }
-
-  if (limitRaw !== undefined && (typeof limitRaw !== "number" || !Number.isFinite(limitRaw))) {
-    throw new Error("limit must be a finite number when provided.");
-  }
-  if (limitRaw !== undefined && limitRaw <= 0) {
-    throw new Error("limit must be greater than 0 when provided.");
-  }
-  if (dryRunRaw !== undefined && typeof dryRunRaw !== "boolean") {
-    throw new Error("dry_run must be a boolean when provided.");
-  }
-  assertOptionalString(categoryRaw, "category");
-  assertOptionalString(serverUrlRaw, "server_url");
-
-  return {
-    keywords,
-    category: typeof categoryRaw === "string" ? categoryRaw : undefined,
-    limit: typeof limitRaw === "number" ? Math.floor(limitRaw) : undefined,
-    dryRun: typeof dryRunRaw === "boolean" ? dryRunRaw : undefined,
-    serverUrl: typeof serverUrlRaw === "string" ? serverUrlRaw : undefined,
-  };
-}
-
-function parseBootstrapPromptsChatArgs(input: unknown): BootstrapPromptsChatArgs {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const templatesPerCategoryRaw = args.templates_per_category;
-  const dryRunRaw = args.dry_run;
-  const serverUrlRaw = args.server_url;
-  const forceRaw = args.force;
-
-  assertOptionalString(serverUrlRaw, "server_url");
-  if (templatesPerCategoryRaw !== undefined && typeof templatesPerCategoryRaw !== "number") {
-    throw new Error("templates_per_category must be a number.");
-  }
-  if (dryRunRaw !== undefined && typeof dryRunRaw !== "boolean") {
-    throw new Error("dry_run must be a boolean.");
-  }
-  if (forceRaw !== undefined && typeof forceRaw !== "boolean") {
-    throw new Error("force must be a boolean.");
-  }
-
-  return {
-    templatesPerCategory:
-      typeof templatesPerCategoryRaw === "number" ? templatesPerCategoryRaw : undefined,
-    dryRun: typeof dryRunRaw === "boolean" ? dryRunRaw : undefined,
-    serverUrl: typeof serverUrlRaw === "string" ? serverUrlRaw : undefined,
-    force: typeof forceRaw === "boolean" ? forceRaw : undefined,
   };
 }
 

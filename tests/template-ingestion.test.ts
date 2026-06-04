@@ -16,10 +16,18 @@ const {
   validateTemplateRecord,
 } = await import("../src/promptsChatSync");
 const { PROMPTS_CHAT_PUBLIC_CATEGORIES } = await import("../src/promptsChatCategories");
-const { handlePromptItToolCall } = await import("../src/refiner");
+const { getPromptItToolDefinitions, handlePromptItToolCall } = await import("../src/refiner");
 const { selectBestTemplate } = await import("../src/templates");
 
 initDatabase();
+
+test("exposes only runtime review tools through the MCP server", () => {
+  const toolNames = getPromptItToolDefinitions().map((tool) => tool.name);
+
+  expect(toolNames).toEqual(["normalize_prompt", "regenerate_prompt", "commit_prompt"]);
+  expect(toolNames).not.toContain("sync_prompts_chat");
+  expect(toolNames).not.toContain("bootstrap_prompts_chat");
+});
 
 test("normalizes prompts.chat prompt content into a TemplateRecord", () => {
   const template = normalizePromptToTemplate(
@@ -219,7 +227,9 @@ test("promptit cli writes generic MCP config for arbitrary hosts", () => {
   expect(config.mcpServers.prompt_it.args[0]).toBe("run");
   expect(config.mcpServers.prompt_it.env.PROMPTIT_DB_PATH).toContain("data/promptit.db");
   expect(existsSync(instructionsPath)).toBe(true);
-  expect(readFileSync(instructionsPath, "utf8")).toContain("Call prompt_it.normalize_prompt");
+  expect(readFileSync(instructionsPath, "utf8")).toContain(
+    "Silently call prompt_it.normalize_prompt"
+  );
 
   unlinkSync(outputPath);
   unlinkSync(instructionsPath);
