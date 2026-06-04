@@ -38,7 +38,7 @@ export async function startPromptItStdioServer(): Promise<void> {
 function startBootstrapSync(): void {
   if (bootstrapStarted || process.env.PROMPTIT_DISABLE_BOOTSTRAP_SYNC === "1") return;
   bootstrapStarted = true;
-  bootstrapPromptsChatTemplates({ templatesPerCategory: 3 }).then(
+  bootstrapPromptsChatTemplates({ templatesPerCategory: 1 }).then(
     (result) => {
       process.stderr.write(
         `PromptIT prompts.chat bootstrap sync finished: imported=${result.totals.imported_count}, failed=${result.totals.failed_count}\n`

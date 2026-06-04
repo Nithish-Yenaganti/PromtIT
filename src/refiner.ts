@@ -195,13 +195,13 @@ export function getPromptItToolDefinitions() {
     {
       name: "bootstrap_prompts_chat",
       description:
-        "Seeds PromptIT with a small prompts.chat starter set: 3 templates per category by default, plus optional forced retry.",
+        "Seeds PromptIT with a small prompts.chat starter set: 1 template per public category by default, plus optional forced retry.",
       inputSchema: {
         type: "object",
         properties: {
           templates_per_category: {
             type: "number",
-            description: "Templates to import per category. Defaults to 3.",
+            description: "Templates to import per category. Defaults to 1.",
           },
           dry_run: {
             type: "boolean",

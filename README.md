@@ -141,14 +141,14 @@ For each messy request:
 - `regenerate_prompt`: update the review session when the user asks for a different version and increment template regeneration stats.
 - `commit_prompt`: approve the current or user-edited prompt, update aggregate template stats, and return `final_prompt` for the host to send.
 - `sync_prompts_chat`: fetch prompts.chat templates, normalize and validate them, then upsert valid templates into the local SQLite template cache.
-- `bootstrap_prompts_chat`: seed the local cache with a small prompts.chat starter set, defaulting to 3 templates per public prompts.chat category.
+- `bootstrap_prompts_chat`: seed the local cache with a small prompts.chat starter set, defaulting to 1 template per public prompts.chat category.
 PromptIT does not run a generative model, does not run embeddings, does not store raw messy prompts, and does not own final delivery.
 
 ## Template Ingestion
 
-On server startup, PromptIT starts a best-effort prompts.chat bootstrap sync in the background. It tries to import 3 templates from each known public prompts.chat category; if prompts.chat is slow or rate-limited, the MCP server still starts and falls back to local/default templates.
+On server startup, PromptIT starts a best-effort prompts.chat bootstrap sync in the background. It tries to import 1 template from each known public prompts.chat category; if prompts.chat is slow or rate-limited, the MCP server still starts and falls back to local/default templates.
 
-Run `bootstrap_prompts_chat` from an MCP host, or run `bun run prompts:chat:sync -- --bootstrap --templates-per-category 3`, to manually retry setup. Run `sync_prompts_chat`, or `bun run prompts:chat:sync -- --dry-run`, to search targeted prompts.chat categories and import valid template metadata into SQLite. The sync defaults to `https://prompts.chat/api/mcp`; set `PROMPTS_API_KEY` if your prompts.chat access requires auth.
+Run `bootstrap_prompts_chat` from an MCP host, or run `bun run prompts:chat:sync -- --bootstrap --templates-per-category 1`, to manually retry setup. Run `sync_prompts_chat`, or `bun run prompts:chat:sync -- --dry-run`, to search targeted prompts.chat categories and import valid template metadata into SQLite. The sync defaults to `https://prompts.chat/api/mcp`; set `PROMPTS_API_KEY` if your prompts.chat access requires auth.
 
 PromptIT must not call prompts.chat `improve_prompt`. prompts.chat is used for template discovery/search only; the host LLM performs refinement and PromptIT wraps that result in the review/approval flow.
 
@@ -167,7 +167,7 @@ For security, custom `server_url` values are rejected unless they use HTTPS and 
 Manual first-run bootstrap:
 
 ```bash
-bun run prompts:chat:sync -- --bootstrap --templates-per-category 3
+bun run prompts:chat:sync -- --bootstrap --templates-per-category 1
 ```
 
 Manual category sync:
