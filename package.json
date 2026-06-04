@@ -19,8 +19,7 @@
     "bun.lock"
   ],
   "devDependencies": {
-    "@types/bun": "^1.3.12",
-    "@types/node": "^25.6.0"
+    "@types/bun": "^1.3.12"
   },
   "peerDependencies": {
     "typescript": "^5"

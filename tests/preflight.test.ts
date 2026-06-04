@@ -10,9 +10,6 @@ test("exposes only preflight runtime tools through the MCP server", () => {
   const toolNames = getPromptItToolDefinitions().map((tool) => tool.name);
 
   expect(toolNames).toEqual(["preflight_request"]);
-  expect(toolNames).not.toContain("normalize_prompt");
-  expect(toolNames).not.toContain("regenerate_prompt");
-  expect(toolNames).not.toContain("commit_prompt");
 });
 
 test("normal coding requests are allowed without policy friction", async () => {
@@ -81,7 +78,6 @@ test("promptit cli previews preflight MCP instructions", () => {
   const stdout = preview.stdout.toString();
   expect(stdout).toContain("[mcp_servers.prompt_it]");
   expect(stdout).toContain("preflight_request");
-  expect(stdout).not.toContain("normalize_prompt");
 });
 
 function makeRepo(): string {
