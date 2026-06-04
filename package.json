@@ -3,6 +3,9 @@
   "version": "3.0.0",
   "type": "module",
   "private": true,
+  "bin": {
+    "promptit": "./src/cli.ts"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.12",
     "@types/node": "^25.6.0"
@@ -23,6 +26,7 @@
     "build": "bun build ./src/server.ts --outdir ./dist --target bun --packages external",
     "start": "bun run ./src/server.ts",
     "start:dist": "bun run ./dist/server.js",
+    "promptit": "bun run ./src/cli.ts",
     "config:codex": "bash scripts/render-codex-config.sh",
     "test": "bun test",
     "prompts:chat:sync": "bun run ./scripts/fetch-prompts-chat-engineering.ts"

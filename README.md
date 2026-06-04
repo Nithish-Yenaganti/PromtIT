@@ -61,12 +61,31 @@ MCP gives PromptIT a clean tool boundary. The server can select templates, retur
 
 ```bash
 bun install
+bun run promptit -- --codex
 bun run start
 ```
 
 ## MCP Host Setup
 
-PromptIT ships as a stdio MCP server. The repository does not install itself into global Codex or project-level host config; generate a config snippet and add it to the host you want to use.
+PromptIT ships as a stdio MCP server. After installing dependencies, use the `promptit` installer command for your MCP host:
+
+```bash
+promptit --codex
+promptit --claude
+promptit --cursor
+promptit --host my-host
+```
+
+`promptit --codex` updates `~/.codex/config.toml` with a managed PromptIT block. `promptit --claude` updates Claude Desktop's `claude_desktop_config.json`. Unknown hosts write a generic `promptit.<host>.mcp.json` file in this repo.
+
+If you do not have the binary linked globally yet, run the same installer through Bun:
+
+```bash
+bun run promptit -- --codex
+bun run promptit -- --claude
+```
+
+You can still generate a config snippet manually and add it to the host you want to use:
 
 ```bash
 bash scripts/render-codex-config.sh
