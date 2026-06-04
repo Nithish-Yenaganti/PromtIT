@@ -290,6 +290,7 @@ function handleCommitPrompt(input: unknown) {
     protocol: "promptit.review.v1",
     status: "committed",
     final_prompt: sanitizedFinal.text,
+    template_citation: buildTemplateCitation(session.templateMatch),
   });
 }
 
@@ -352,6 +353,7 @@ function buildReviewPayload(args: {
       protocol: "promptit.review.v1",
       status: args.status,
       converted_prompt: args.convertedPrompt,
+      template_citation: buildTemplateCitation(args.templateMatch),
     };
   }
 
@@ -389,6 +391,16 @@ function buildReviewPayload(args: {
       : undefined,
     regeneration_instruction: args.regenerationInstruction,
     notices: args.notices?.filter(Boolean).length ? args.notices.filter(Boolean) : undefined,
+  };
+}
+
+function buildTemplateCitation(match: TemplateMatch | undefined):
+  | { source: string; name: string }
+  | undefined {
+  if (!match) return undefined;
+  return {
+    source: match.template.source,
+    name: match.template.name,
   };
 }
 

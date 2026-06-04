@@ -165,6 +165,11 @@ test("review payloads do not expose user-visible action button hints", async () 
   expect(secondPayload.send_instruction).toBeUndefined();
   expect(secondPayload.notices).toBeUndefined();
   expect(secondPayload.converted_prompt).toBe("Rewrite the request into a concise prompt.");
+  expect(secondPayload.template_citation).toEqual({
+    source: expect.any(String),
+    name: expect.any(String),
+  });
+  expect(Object.keys(secondPayload.template_citation)).toEqual(["source", "name"]);
 
   const committed = await handlePromptItToolCall("commit_prompt", {
     task_id: firstPayload.task_id,
@@ -180,6 +185,7 @@ test("review payloads do not expose user-visible action button hints", async () 
     protocol: "promptit.review.v1",
     status: "committed",
     final_prompt: "Rewrite the request into a concise prompt.",
+    template_citation: secondPayload.template_citation,
   });
 });
 

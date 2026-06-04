@@ -218,7 +218,11 @@ bun run promptit -- sync --categories coding --limit 3
 {
   "protocol": "promptit.review.v1",
   "status": "ready_for_review",
-  "converted_prompt": "..."
+  "converted_prompt": "...",
+  "template_citation": {
+    "source": "prompts.chat",
+    "name": "Coding Change Request"
+  }
 }
 ```
 
