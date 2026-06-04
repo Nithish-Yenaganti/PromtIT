@@ -2,48 +2,11 @@ import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { spawnSync } from "bun";
 import { MAX_TEXT_CHARS } from "./config";
+import { POLICIES, type Decision, type RepoFacts, type RiskType } from "./policies";
 
 type PreflightArgs = {
   request: string;
   repoPath?: string;
-};
-
-type Decision = "skip" | "allow" | "warn" | "needs_confirmation" | "block";
-
-type RiskType =
-  | "safe_simple"
-  | "normal_coding"
-  | "database_migration"
-  | "auth_security_change"
-  | "production_deploy"
-  | "dependency_upgrade"
-  | "large_refactor"
-  | "secrets_risk"
-  | "infrastructure_change";
-
-type RepoFacts = {
-  repo_path: string;
-  is_git_repo: boolean;
-  branch: string | null;
-  dirty_files: number;
-  changed_files: string[];
-  staged_files: string[];
-  package_manager: string | null;
-  test_scripts: string[];
-  ci_present: boolean;
-  migration_files_changed: string[];
-  auth_files_changed: string[];
-  deploy_files_changed: string[];
-  dependency_files_changed: string[];
-  secret_findings: number;
-};
-
-type Policy = {
-  riskType: RiskType;
-  severity: "low" | "medium" | "high" | "critical";
-  decision: Decision;
-  requiredChecks: string[];
-  blockedWhen?: (facts: RepoFacts, request: string) => string[];
 };
 
 const SECRET_PATTERNS = [
@@ -57,105 +20,6 @@ const SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
   /\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*\s*=\s*["']?[^"'\s]{8,}/gi,
 ];
-
-const POLICIES: Record<RiskType, Policy> = {
-  safe_simple: {
-    riskType: "safe_simple",
-    severity: "low",
-    decision: "skip",
-    requiredChecks: [],
-  },
-  normal_coding: {
-    riskType: "normal_coding",
-    severity: "low",
-    decision: "allow",
-    requiredChecks: [],
-  },
-  database_migration: {
-    riskType: "database_migration",
-    severity: "high",
-    decision: "needs_confirmation",
-    requiredChecks: [
-      "inspect existing migration history",
-      "confirm rollback or reversible migration plan",
-      "run migration/database tests if available",
-      "do not push until user confirms migration safety",
-    ],
-    blockedWhen: (facts) =>
-      facts.branch === "main" || facts.branch === "master"
-        ? ["database migration risk detected on main/master branch"]
-        : [],
-  },
-  auth_security_change: {
-    riskType: "auth_security_change",
-    severity: "high",
-    decision: "needs_confirmation",
-    requiredChecks: [
-      "review auth/session/token/cookie behavior",
-      "add or update security-sensitive tests",
-      "check access-control boundaries",
-      "do not push until user confirms auth risk",
-    ],
-  },
-  production_deploy: {
-    riskType: "production_deploy",
-    severity: "high",
-    decision: "needs_confirmation",
-    requiredChecks: [
-      "confirm current branch and dirty working tree",
-      "run relevant tests/build before deploy or push",
-      "identify rollback plan",
-      "require explicit user confirmation before push/deploy",
-    ],
-    blockedWhen: (facts, request) =>
-      (facts.branch === "main" || facts.branch === "master") && /push|deploy|release/i.test(request)
-        ? ["push/deploy requested while on main/master"]
-        : [],
-  },
-  dependency_upgrade: {
-    riskType: "dependency_upgrade",
-    severity: "medium",
-    decision: "warn",
-    requiredChecks: [
-      "inspect package and lockfile changes",
-      "identify major version upgrades",
-      "run tests/build after dependency update",
-      "review security audit output when available",
-    ],
-  },
-  large_refactor: {
-    riskType: "large_refactor",
-    severity: "medium",
-    decision: "warn",
-    requiredChecks: [
-      "scope the refactor before editing",
-      "avoid unrelated rewrites",
-      "run tests/build",
-      "summarize changed modules and residual risk",
-    ],
-  },
-  secrets_risk: {
-    riskType: "secrets_risk",
-    severity: "critical",
-    decision: "block",
-    requiredChecks: [
-      "remove secret-looking values from diff",
-      "rotate exposed credentials if they were real",
-      "do not commit or push until secret scan is clean",
-    ],
-  },
-  infrastructure_change: {
-    riskType: "infrastructure_change",
-    severity: "high",
-    decision: "needs_confirmation",
-    requiredChecks: [
-      "review infra/deploy config changes",
-      "confirm environment impact",
-      "identify rollback plan",
-      "run validation command when available",
-    ],
-  },
-};
 
 export function getPromptItToolDefinitions() {
   return [

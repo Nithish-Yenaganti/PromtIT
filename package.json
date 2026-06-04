@@ -13,7 +13,6 @@
     "src",
     "scripts",
     "README.md",
-    "PROMPTENGINEER.md",
     "config.example.toml",
     "package.json",
     "bun.lock"

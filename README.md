@@ -41,6 +41,26 @@ The seat belt example is the simplest way to think about it: a good driver still
 - Secret-looking values in diffs
 - Infrastructure and CI/deploy config changes
 
+## Policy Structure
+
+Runtime policies live in `src/policies/` as typed source modules. Each risk area has its own file, and `src/policies/index.ts` exports the combined policy map used by `src/preflight.ts`.
+
+```text
+src/policies/
+  auth.ts
+  database.ts
+  dependencies.ts
+  deploy.ts
+  infrastructure.ts
+  normalCoding.ts
+  refactor.ts
+  safeSimple.ts
+  secrets.ts
+  types.ts
+```
+
+PromptIT does not use Markdown policy files for enforcement. Markdown is only documentation; the executable safety decisions stay in typed code so they can be tested and kept deterministic.
+
 ## Runtime Flow
 
 ```text

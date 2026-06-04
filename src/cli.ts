@@ -186,7 +186,7 @@ function renderCodexBlock(): string {
     `args = ["run", "${escapeToml(serverPath)}"]`,
     `cwd = "${escapeToml(rootDir)}"`,
     "",
-    "[agents.prompt_engineer]",
+    "[agents.promptit_preflight]",
     'description = "Repo-aware safety preflight for risky AI coding agent workflows."',
     'mcp_servers = ["prompt_it"]',
     'developer_instructions = """',

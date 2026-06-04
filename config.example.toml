@@ -11,7 +11,7 @@ cwd = "/YOUR/ABSOLUTE/PATH"
 # [mcp_servers.prompt_it.env]
 # PROMPTIT_TARGET_REPO = "/YOUR/PROJECT/PATH"
 
-[agents.prompt_engineer]
+[agents.promptit_preflight]
 description = "Safety preflight for risky AI coding agent workflows."
 mcp_servers = ["prompt_it"]
 developer_instructions = """

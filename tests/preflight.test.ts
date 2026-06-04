@@ -5,11 +5,26 @@ import path from "path";
 import { spawnSync } from "bun";
 
 const { getPromptItToolDefinitions, handlePromptItToolCall } = await import("../src/preflight");
+const { POLICIES } = await import("../src/policies");
 
 test("exposes only preflight runtime tools through the MCP server", () => {
   const toolNames = getPromptItToolDefinitions().map((tool) => tool.name);
 
   expect(toolNames).toEqual(["preflight_request"]);
+});
+
+test("exports the complete preflight policy registry", () => {
+  expect(Object.keys(POLICIES).sort()).toEqual([
+    "auth_security_change",
+    "database_migration",
+    "dependency_upgrade",
+    "infrastructure_change",
+    "large_refactor",
+    "normal_coding",
+    "production_deploy",
+    "safe_simple",
+    "secrets_risk",
+  ]);
 });
 
 test("normal coding requests are allowed without policy friction", async () => {
