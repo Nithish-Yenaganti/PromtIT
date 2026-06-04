@@ -21,7 +21,7 @@ PromptIT no longer runs embedding models and no longer stores raw prompt history
 1. Template Routing: classify the messy request with deterministic keyword/tag rules.
 2. Template Selection: choose the best cached prompts.chat-style template using intent, tags, quality score, and aggregate stats.
 3. Host LLM Payload: return the messy request plus selected template instructions so the host LLM can generate the refined prompt.
-4. Review Protocol: return `promptit.review.v1` payloads for host-side edit, regenerate, and send/execute controls.
+4. Review Protocol: return `promptit.review.v1` payloads for host-side review state without user-visible action button hints.
 5. Minimal Learning: store only template-level counters such as selected, edited, regenerated, accepted, rejected, and executed counts.
 
 ## System Architecture
@@ -228,11 +228,6 @@ bun run promptit -- sync --categories coding --limit 3
     "source": "prompts.chat",
     "score": 0.8125,
     "reasons": ["intent:coding", "matched:code,repo,build"]
-  },
-  "actions": ["edit", "regenerate", "send"],
-  "tools": {
-    "regenerate": "regenerate_prompt",
-    "send": "commit_prompt"
   }
 }
 ```

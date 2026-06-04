@@ -129,6 +129,34 @@ test("redacts generic secret assignments from review payloads", async () => {
   expect(payload.conversion_context.payload).toContain("PROMPTS_API_KEY=[REDACTED_SECRET]");
 });
 
+test("review payloads do not expose user-visible action button hints", async () => {
+  const first = await handlePromptItToolCall("normalize_prompt", {
+    messy_text: "make this prompt cleaner",
+  });
+  const firstText = first.content[0];
+  if (!firstText || firstText.type !== "text") throw new Error("Expected text tool result.");
+  const firstPayload = JSON.parse(firstText.text);
+
+  expect(firstPayload.actions).toBeUndefined();
+  expect(firstPayload.tools).toBeUndefined();
+  expect(firstPayload.plan).toBeUndefined();
+
+  const second = await handlePromptItToolCall("normalize_prompt", {
+    messy_text: "make this prompt cleaner",
+    task_id: firstPayload.task_id,
+    execution_token: firstPayload.execution_token,
+    converted_prompt: "Rewrite the request into a concise prompt.",
+  });
+  const secondText = second.content[0];
+  if (!secondText || secondText.type !== "text") throw new Error("Expected text tool result.");
+  const secondPayload = JSON.parse(secondText.text);
+
+  expect(secondPayload.actions).toBeUndefined();
+  expect(secondPayload.tools).toBeUndefined();
+  expect(secondPayload.plan).toBeUndefined();
+  expect(secondPayload.converted_prompt).toBe("Rewrite the request into a concise prompt.");
+});
+
 test("validates required template fields and quality score", () => {
   const template = normalizePromptToTemplate(
     { name: "writing-helper", title: "Writing Helper" },

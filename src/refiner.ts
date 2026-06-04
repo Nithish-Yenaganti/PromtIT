@@ -365,13 +365,6 @@ function buildReviewPayload(args: {
   destination?: string;
   tokenReport?: string;
 }) {
-  const actions =
-    args.status === "committed"
-      ? []
-      : args.convertedPrompt
-        ? ["edit", "regenerate", "send"]
-        : ["generate_converted_prompt"];
-
   return {
     protocol: "promptit.review.v1",
     status: args.status,
@@ -383,25 +376,6 @@ function buildReviewPayload(args: {
     original_prompt: args.originalPrompt,
     converted_prompt: args.convertedPrompt ?? null,
     revision_count: args.session.revisionCount,
-    plan: [
-      {
-        id: "review",
-        label: args.convertedPrompt
-          ? "Review converted prompt"
-          : "Generate converted prompt from conversion_context",
-        state: args.convertedPrompt ? "ready" : "waiting",
-      },
-      {
-        id: "approve",
-        label: "User may edit, regenerate, or send",
-        state: args.convertedPrompt ? "available" : "blocked",
-      },
-    ],
-    actions,
-    tools: {
-      regenerate: "regenerate_prompt",
-      send: "commit_prompt",
-    },
     selected_template: args.templateMatch
       ? {
           id: args.templateMatch.template.id,
