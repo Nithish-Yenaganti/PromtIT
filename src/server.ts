@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { initDatabase } from "./database";
-import { getPromptItToolDefinitions, handlePromptItToolCall } from "./refiner";
+import { getPromptItToolDefinitions, handlePromptItToolCall } from "./preflight";
 
 initDatabase();
 

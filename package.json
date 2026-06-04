@@ -3,7 +3,7 @@
   "version": "3.0.0",
   "type": "module",
   "private": false,
-  "description": "PromptIT MCP server and installer for prompt review before execution.",
+  "description": "PromptIT MCP server and installer for repo-aware AI coding safety preflights.",
   "license": "MIT",
   "packageManager": "bun@1.3.12",
   "bin": {
@@ -40,8 +40,7 @@
     "start:dist": "bun run ./dist/server.js",
     "promptit": "bun run ./src/cli.ts",
     "config:codex": "bash scripts/render-codex-config.sh",
-    "test": "bun test",
-    "prompts:chat:sync": "bun run ./scripts/fetch-prompts-chat-engineering.ts"
+    "test": "bun test"
   },
   "module": "src/server.ts"
 }
