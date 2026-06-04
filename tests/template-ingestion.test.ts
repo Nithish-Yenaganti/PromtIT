@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { existsSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, unlinkSync } from "fs";
 import os from "os";
 import path from "path";
+import { spawnSync } from "bun";
 
 const testDbPath = path.join(os.tmpdir(), `promptit-template-ingestion-${Date.now()}.db`);
 if (existsSync(testDbPath)) unlinkSync(testDbPath);
@@ -196,4 +197,25 @@ test("selects expected default templates for messy prompts", () => {
     expect(match.template.intent_type).toBe(item.intentType);
     expect(match.template.task_type).toBe(item.taskType);
   }
+});
+
+test("promptit cli writes generic MCP config for arbitrary hosts", () => {
+  const outputPath = path.resolve("promptit.test-host.mcp.json");
+  if (existsSync(outputPath)) unlinkSync(outputPath);
+
+  const result = spawnSync({
+    cmd: ["bun", "run", "./src/cli.ts", "--test-host"],
+    cwd: path.resolve("."),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(existsSync(outputPath)).toBe(true);
+  const config = JSON.parse(readFileSync(outputPath, "utf8"));
+  expect(config.mcpServers.prompt_it.command).toBe("bun");
+  expect(config.mcpServers.prompt_it.args[0]).toBe("run");
+  expect(config.mcpServers.prompt_it.env.PROMPTIT_DB_PATH).toContain("data/promptit.db");
+
+  unlinkSync(outputPath);
 });
