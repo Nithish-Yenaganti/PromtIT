@@ -64,6 +64,17 @@ export type CategoryStats = {
   last_synced_at: string | null;
 };
 
+export type SyncQueueStatus = "pending" | "synced" | "rate_limited" | "failed" | "skipped";
+
+export type SyncQueueItem = {
+  category: string;
+  status: SyncQueueStatus;
+  attempts: number;
+  retry_after_seconds: number | null;
+  last_error: string | null;
+  updated_at: string;
+};
+
 function uniquePaths(paths: Array<string | undefined>): string[] {
   const seen = new Set<string>();
   const ordered: string[] = [];
@@ -171,6 +182,17 @@ export function initDatabase(): void {
       synced_count INTEGER NOT NULL DEFAULT 0,
       last_used_at TEXT,
       last_synced_at TEXT
+    ) STRICT;
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sync_queue (
+      category TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'synced', 'rate_limited', 'failed', 'skipped')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      retry_after_seconds INTEGER,
+      last_error TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) STRICT;
   `);
 
@@ -367,6 +389,39 @@ export function listCategoryStats(): CategoryStats[] {
        ORDER BY executed_count DESC, accepted_count DESC, selected_count DESC`
     )
     .all() as CategoryStats[];
+}
+
+export function upsertSyncQueueItem(
+  category: string,
+  status: SyncQueueStatus = "pending",
+  retryAfterSeconds?: number | null,
+  lastError?: string | null
+): void {
+  const normalized = normalizeCategoryName(category);
+  if (!normalized) return;
+  db.prepare(
+    `INSERT INTO sync_queue (category, status, attempts, retry_after_seconds, last_error, updated_at)
+     VALUES (?, ?, CASE WHEN ? = 'pending' THEN 0 ELSE 1 END, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(category) DO UPDATE SET
+       status = excluded.status,
+       attempts = CASE WHEN excluded.status = 'pending' THEN sync_queue.attempts ELSE sync_queue.attempts + 1 END,
+       retry_after_seconds = excluded.retry_after_seconds,
+       last_error = excluded.last_error,
+       updated_at = CURRENT_TIMESTAMP`
+  ).run(normalized, status, status, retryAfterSeconds ?? null, lastError ?? null);
+}
+
+export function listSyncQueueItems(status?: SyncQueueStatus): SyncQueueItem[] {
+  const sql = status
+    ? `SELECT category, status, attempts, retry_after_seconds, last_error, updated_at
+       FROM sync_queue
+       WHERE status = ?
+       ORDER BY updated_at ASC`
+    : `SELECT category, status, attempts, retry_after_seconds, last_error, updated_at
+       FROM sync_queue
+       ORDER BY updated_at ASC`;
+  const stmt = db.prepare(sql);
+  return (status ? stmt.all(status) : stmt.all()) as SyncQueueItem[];
 }
 
 function normalizeCategoryName(category: string): string {

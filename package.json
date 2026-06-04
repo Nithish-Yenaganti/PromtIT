@@ -2,10 +2,22 @@
   "name": "promptit-mcp",
   "version": "3.0.0",
   "type": "module",
-  "private": true,
+  "private": false,
+  "description": "PromptIT MCP server and installer for prompt review before execution.",
+  "license": "MIT",
+  "packageManager": "bun@1.3.12",
   "bin": {
     "promptit": "./src/cli.ts"
   },
+  "files": [
+    "src",
+    "scripts",
+    "README.md",
+    "PROMPTENGINEER.md",
+    "config.example.toml",
+    "package.json",
+    "bun.lock"
+  ],
   "devDependencies": {
     "@types/bun": "^1.3.12",
     "@types/node": "^25.6.0"

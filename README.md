@@ -61,7 +61,7 @@ MCP gives PromptIT a clean tool boundary. The server can select templates, retur
 
 ```bash
 bun install
-bun run promptit -- --codex
+bun run promptit -- --codex --preset developer
 bun run start
 ```
 
@@ -70,19 +70,31 @@ bun run start
 PromptIT ships as a stdio MCP server. After installing dependencies, use the `promptit` installer command for your MCP host:
 
 ```bash
-promptit --codex
-promptit --claude
-promptit --cursor
-promptit --host my-host
+promptit --codex --preset developer
+promptit --claude --categories coding,technical-writing
+promptit --cursor --preset writer
+promptit --host my-host --print-config
 ```
 
 `promptit --codex` updates `~/.codex/config.toml` with a managed PromptIT block. `promptit --claude` updates Claude Desktop's `claude_desktop_config.json`. Unknown hosts write a generic `promptit.<host>.mcp.json` file in this repo.
 
+PromptIT does not have to load every prompts.chat category. Pick what the user needs:
+
+```bash
+promptit categories
+promptit sync --preset developer --limit 1
+promptit sync --categories coding,writing,business --limit 1
+promptit sync --resume
+promptit doctor
+```
+
+Available presets are `developer`, `writer`, `business`, `creative`, `productivity`, and `all`. Prefer a focused preset over `all` because prompts.chat rate-limits category syncs.
+
 If you do not have the binary linked globally yet, run the same installer through Bun:
 
 ```bash
-bun run promptit -- --codex
-bun run promptit -- --claude
+bun run promptit -- --codex --preset developer
+bun run promptit -- --claude --categories coding,technical-writing
 ```
 
 You can still generate a config snippet manually and add it to the host you want to use:
@@ -186,13 +198,13 @@ For security, custom `server_url` values are rejected unless they use HTTPS and 
 Manual first-run bootstrap:
 
 ```bash
-bun run prompts:chat:sync -- --bootstrap --templates-per-category 1
+bun run promptit -- sync --preset developer --limit 1
 ```
 
 Manual category sync:
 
 ```bash
-bun run prompts:chat:sync -- --category coding --limit 3
+bun run promptit -- sync --categories coding --limit 3
 ```
 
 ## Review Payload Shape

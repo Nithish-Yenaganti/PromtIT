@@ -9,11 +9,18 @@ import {
 import {
   getCategoryStats,
   initDatabase,
+  listSyncQueueItems,
   recordCategoryEvent,
+  upsertSyncQueueItem,
   upsertTemplates,
   type TemplateRecord,
 } from "./database";
-import { PROMPTS_CHAT_PUBLIC_CATEGORIES } from "./promptsChatCategories";
+import {
+  PROMPTS_CHAT_CATEGORY_SLUGS,
+  PROMPTS_CHAT_PUBLIC_CATEGORIES,
+  type PromptsChatCategoryConfig,
+  validatePromptsChatCategories,
+} from "./promptsChatCategories";
 
 const DEFAULT_PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp";
 const ALLOWED_MCP_URL_ENV = "PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS";
@@ -58,10 +65,12 @@ export type SyncPromptsChatOptions = {
 };
 
 export type BootstrapPromptsChatOptions = {
+  categories?: string[];
   templatesPerCategory?: number;
   dryRun?: boolean;
   serverUrl?: string;
   force?: boolean;
+  resume?: boolean;
 };
 
 export type TemplateValidationError = {
@@ -356,10 +365,12 @@ export async function bootstrapPromptsChatTemplates(
   );
   const dryRun = options.dryRun ?? false;
   const categories: BootstrapPromptsChatResult["categories"] = [];
+  const requestedCategories = normalizeBootstrapCategories(options.categories, options.resume);
 
-  for (const config of PROMPTS_CHAT_BOOTSTRAP_CATEGORIES) {
+  for (const config of requestedCategories) {
     const stats = getCategoryStats(config.category);
     if (!options.force && !dryRun && stats.synced_count > 0) {
+      upsertSyncQueueItem(config.category, "skipped", null, "category already synced");
       categories.push({
         category: config.category,
         keywords: [...config.keywords],
@@ -382,6 +393,9 @@ export async function bootstrapPromptsChatTemplates(
       });
       if (!dryRun && result.imported_count > 0) {
         recordCategoryEvent(config.category, "synced");
+        upsertSyncQueueItem(config.category, "synced");
+      } else if (!dryRun) {
+        upsertSyncQueueItem(config.category, "failed", null, "no templates imported");
       }
       categories.push({
         category: config.category,
@@ -392,6 +406,16 @@ export async function bootstrapPromptsChatTemplates(
         skipped: false,
       });
     } catch (error: unknown) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const retryAfterSeconds = parseRetryAfterSeconds(reason);
+      if (!dryRun) {
+        upsertSyncQueueItem(
+          config.category,
+          retryAfterSeconds ? "rate_limited" : "failed",
+          retryAfterSeconds,
+          reason
+        );
+      }
       categories.push({
         category: config.category,
         keywords: [...config.keywords],
@@ -399,8 +423,9 @@ export async function bootstrapPromptsChatTemplates(
         imported_count: 0,
         failed_count: 1,
         skipped: false,
-        reason: error instanceof Error ? error.message : String(error),
+        reason,
       });
+      if (retryAfterSeconds) break;
     }
   }
 
@@ -415,6 +440,13 @@ export async function bootstrapPromptsChatTemplates(
       failed_count: categories.reduce((sum, item) => sum + item.failed_count, 0),
     },
   };
+}
+
+export function parseRetryAfterSeconds(message: string): number | undefined {
+  const match = message.match(/try again in\s+(\d+)s/i);
+  if (!match) return undefined;
+  const seconds = Number(match[1]);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : undefined;
 }
 
 export async function syncPromptsChatForCategory(category: string): Promise<SyncPromptsChatResult> {
@@ -436,6 +468,31 @@ export function shouldSyncCategoryMore(category: string): boolean {
   const selectedTarget = Math.max(1, (stats.synced_count + 1) * DEFAULT_ADAPTIVE_SELECTED_THRESHOLD);
   const executedTarget = Math.max(1, (stats.synced_count + 1) * DEFAULT_ADAPTIVE_EXECUTED_THRESHOLD);
   return stats.selected_count >= selectedTarget || stats.executed_count >= executedTarget;
+}
+
+function normalizeBootstrapCategories(
+  categories?: string[],
+  resume?: boolean
+): PromptsChatCategoryConfig[] {
+  const source = resume
+    ? listSyncQueueItems("rate_limited").map((item) => item.category)
+    : categories && categories.length > 0
+      ? categories
+      : PROMPTS_CHAT_BOOTSTRAP_CATEGORIES.map((item) => item.category);
+  const normalized = Array.from(
+    new Set(source.map((category) => category.trim().toLowerCase()).filter(Boolean))
+  );
+  const invalid = validatePromptsChatCategories(normalized);
+  if (invalid.length > 0) {
+    throw new Error(`Unknown prompts.chat category slug(s): ${invalid.join(", ")}`);
+  }
+  return normalized
+    .filter((category) => PROMPTS_CHAT_CATEGORY_SLUGS.has(category))
+    .map((category) => {
+      const config = PROMPTS_CHAT_BOOTSTRAP_CATEGORIES.find((item) => item.category === category);
+      if (!config) throw new Error(`No prompts.chat category config for ${category}.`);
+      return config;
+    });
 }
 
 export function normalizePromptToTemplate(

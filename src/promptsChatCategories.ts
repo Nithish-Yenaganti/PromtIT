@@ -55,6 +55,60 @@ export const PROMPTS_CHAT_PUBLIC_CATEGORIES = [
   { category: "startup-entrepreneurship", keywords: ["startup entrepreneurship"] },
 ] as const;
 
+export type PromptsChatCategoryConfig = {
+  category: string;
+  keywords: readonly string[];
+};
+
 export const PROMPTS_CHAT_CATEGORY_SLUGS: ReadonlySet<string> = new Set(
   PROMPTS_CHAT_PUBLIC_CATEGORIES.map((item) => item.category)
 );
+
+export const PROMPTS_CHAT_CATEGORY_PRESETS: Record<string, string[]> = {
+  developer: [
+    "coding",
+    "web-development",
+    "devops",
+    "data-science",
+    "technical-writing",
+    "agent-workflows",
+  ],
+  writer: [
+    "writing",
+    "blog-writing",
+    "copywriting",
+    "technical-writing",
+    "email-communication",
+    "academic-writing",
+  ],
+  business: [
+    "business",
+    "business-strategy",
+    "business-planning",
+    "market-analysis",
+    "marketing-sales",
+    "leadership-management",
+    "startup-entrepreneurship",
+  ],
+  creative: [
+    "creative",
+    "design",
+    "image-generation",
+    "video-generation",
+    "music",
+    "copywriting",
+  ],
+  productivity: [
+    "productivity",
+    "time-management",
+    "note-taking",
+    "meeting-collaboration",
+    "email-communication",
+    "automation-workflows",
+  ],
+  all: PROMPTS_CHAT_PUBLIC_CATEGORIES.map((item) => item.category),
+};
+
+export function validatePromptsChatCategories(categories: string[]): string[] {
+  return categories.filter((category) => !PROMPTS_CHAT_CATEGORY_SLUGS.has(category));
+}

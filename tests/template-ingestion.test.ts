@@ -219,3 +219,23 @@ test("promptit cli writes generic MCP config for arbitrary hosts", () => {
 
   unlinkSync(outputPath);
 });
+
+test("promptit cli previews config and rejects unknown categories", () => {
+  const preview = spawnSync({
+    cmd: ["bun", "run", "./src/cli.ts", "--codex", "--print-config"],
+    cwd: path.resolve("."),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(preview.exitCode).toBe(0);
+  expect(preview.stdout.toString()).toContain("[mcp_servers.prompt_it]");
+
+  const invalid = spawnSync({
+    cmd: ["bun", "run", "./src/cli.ts", "sync", "--categories", "not-a-real-category", "--dry-run"],
+    cwd: path.resolve("."),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(invalid.exitCode).toBe(1);
+  expect(invalid.stderr.toString()).toContain("Unknown prompts.chat category");
+});
