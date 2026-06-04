@@ -89,15 +89,23 @@ There is no prompt-refiner layer, no prompts.chat ingestion, no database module,
 ```text
 User request
    |
-Host silently calls preflight_request
+Host LLM silently suggests risk_type + confidence
+   |
+Host calls preflight_request
    |
 PromptIT inspects request + repo
+   |
+PromptIT combines host signal + local repo signals
+   |
+Hard policies make the final decision
    |
 safe/normal -> skip or allow
 risky      -> warn, needs_confirmation, or block
    |
 Host follows decision before editing
 ```
+
+The host LLM can help interpret vague language like "ship this" or "make it live", but it cannot override hard PromptIT rules. For example, secret-looking diffs still `block`, and database migrations on `main` or `master` still `block`.
 
 Example response:
 
@@ -106,6 +114,8 @@ Example response:
   "protocol": "promptit.preflight.v1",
   "decision": "needs_confirmation",
   "risk_type": "database_migration",
+  "local_risk_type": "database_migration",
+  "host_classification": null,
   "severity": "high",
   "evidence": [
     "classified request as database_migration",
@@ -132,12 +142,17 @@ Tool input:
 
 ```json
 {
-  "request": "deploy this and push it",
-  "repo_path": "/absolute/path/to/repo"
+  "request": "ship this today",
+  "repo_path": "/absolute/path/to/repo",
+  "host_classification": {
+    "risk_type": "production_deploy",
+    "confidence": 0.86,
+    "summary": "The phrase ship this likely means release or deploy work."
+  }
 }
 ```
 
-`repo_path` is optional. If the host cannot pass it, PromptIT falls back to `PROMPTIT_TARGET_REPO` and then the current working directory.
+`repo_path` and `host_classification` are optional. If the host cannot pass `repo_path`, PromptIT falls back to `PROMPTIT_TARGET_REPO` and then the current working directory.
 
 ## Repo Facts Inspected
 
@@ -184,12 +199,14 @@ bun run promptit -- --codex
 
 Generated host instructions tell the agent:
 
-1. Call `prompt_it.preflight_request` before risky coding work.
-2. Pass the active workspace path as `repo_path` when available.
-3. Proceed normally for `skip` or `allow`.
-4. Apply `host_instruction` for `warn`.
-5. Ask for confirmation for `needs_confirmation`.
-6. Stop for `block`.
+1. Silently classify the request into a likely PromptIT `risk_type` with confidence and a short summary.
+2. Call `prompt_it.preflight_request` before any non-tiny coding request.
+3. Pass the active workspace path as `repo_path` when available.
+4. Pass the host classification as `host_classification`.
+5. Proceed normally for `skip` or `allow`.
+6. Apply `host_instruction` for `warn`.
+7. Ask for confirmation for `needs_confirmation`.
+8. Stop for `block`.
 
 PromptIT should stay silent for ordinary low-risk coding tasks.
 

@@ -19,11 +19,12 @@ developer_instructions = """
 You are the orchestration layer only.
 Use PromptIT as a repo-aware safety preflight before risky coding work.
 Skip PromptIT for tiny mechanical tasks, simple questions, and ordinary low-risk edits.
-Before executing requests involving deploys, pushes, database/schema changes, auth/security, dependencies, infrastructure, secrets, or large refactors:
-1. Silently call prompt_it.preflight_request with request set to the user's raw request and repo_path set to the active workspace path when available.
-2. If decision is skip or allow, proceed normally.
-3. If decision is warn, apply host_instruction before editing and include required checks in your work.
-4. If decision is needs_confirmation, show the user the risk summary and required checks, then wait for confirmation before dangerous actions.
-5. If decision is block, do not continue until the blocking condition is resolved.
+Before executing any non-tiny coding request:
+1. Silently classify the user's request into a likely PromptIT risk_type with confidence and a short summary.
+2. Silently call prompt_it.preflight_request with request set to the user's raw request, repo_path set to the active workspace path when available, and host_classification set to that classification.
+3. If decision is skip or allow, proceed normally.
+4. If decision is warn, apply host_instruction before editing and include required checks in your work.
+5. If decision is needs_confirmation, show the user the risk summary and required checks, then wait for confirmation before dangerous actions.
+6. If decision is block, do not continue until the blocking condition is resolved.
 Do not use PromptIT to rewrite normal prompts. PromptIT is a safety gate, not a prompt cleaner.
 """

@@ -41,6 +41,69 @@ test("normal coding requests are allowed without policy friction", async () => {
   expect(payload.required_checks).toEqual([]);
 });
 
+test("host classification can raise risk for ambiguous requests", async () => {
+  const repoPath = makeRepo();
+  const result = await handlePromptItToolCall("preflight_request", {
+    request: "ship this today",
+    repo_path: repoPath,
+    host_classification: {
+      risk_type: "production_deploy",
+      confidence: 0.86,
+      summary: "The phrase ship this likely means release or deploy work.",
+    },
+  });
+  const payload = parseToolPayload(result);
+
+  expect(payload.decision).toBe("block");
+  expect(payload.risk_type).toBe("production_deploy");
+  expect(payload.local_risk_type).toBe("safe_simple");
+  expect(payload.host_classification).toEqual({
+    risk_type: "production_deploy",
+    confidence: 0.86,
+    summary: "The phrase ship this likely means release or deploy work.",
+  });
+  expect(payload.evidence).toContain("production deploy risk detected on main/master branch");
+  expect(payload.evidence).toContain("host classification raised risk from safe_simple");
+});
+
+test("host classification cannot lower a hard local risk", async () => {
+  const repoPath = makeRepo();
+  writeFileSync(path.join(repoPath, "migrations", "001_add_users.sql"), "alter table users add column name text;\n");
+
+  const result = await handlePromptItToolCall("preflight_request", {
+    request: "small cleanup",
+    repo_path: repoPath,
+    host_classification: {
+      risk_type: "safe_simple",
+      confidence: 0.99,
+      summary: "Host thinks this is harmless.",
+    },
+  });
+  const payload = parseToolPayload(result);
+
+  expect(payload.decision).toBe("block");
+  expect(payload.risk_type).toBe("database_migration");
+  expect(payload.local_risk_type).toBe("database_migration");
+});
+
+test("host classification summary is redacted before output", async () => {
+  const repoPath = makeRepo();
+  const result = await handlePromptItToolCall("preflight_request", {
+    request: "ship this today",
+    repo_path: repoPath,
+    host_classification: {
+      risk_type: "production_deploy",
+      confidence: 0.86,
+      summary: "Contains token sk-proj-abcdefghijklmnopqrstuvwxyz but still means deploy.",
+    },
+  });
+  const payload = parseToolPayload(result);
+  const raw = JSON.stringify(payload);
+
+  expect(payload.host_classification.summary).toContain("[REDACTED]");
+  expect(raw).not.toContain("sk-proj-abcdefghijklmnopqrstuvwxyz");
+});
+
 test("database migration on main is blocked with concrete evidence", async () => {
   const repoPath = makeRepo();
   writeFileSync(path.join(repoPath, "migrations", "001_add_users.sql"), "alter table users add column name text;\n");

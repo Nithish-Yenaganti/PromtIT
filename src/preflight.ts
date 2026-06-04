@@ -7,6 +7,13 @@ import { POLICIES, type Decision, type RepoFacts, type RiskType } from "./polici
 type PreflightArgs = {
   request: string;
   repoPath?: string;
+  hostClassification?: HostClassification;
+};
+
+type HostClassification = {
+  riskType?: RiskType;
+  confidence?: number;
+  summary?: string;
 };
 
 const SECRET_PATTERNS = [
@@ -39,6 +46,27 @@ export function getPromptItToolDefinitions() {
             description:
               "Optional absolute path to the target repository. Defaults to PROMPTIT_TARGET_REPO or current working directory.",
           },
+          host_classification: {
+            type: "object",
+            description:
+              "Optional host-LLM risk classification. PromptIT treats this as a signal only; hard repo policies still make the final decision.",
+            properties: {
+              risk_type: {
+                type: "string",
+                description:
+                  "Suggested risk type: safe_simple, normal_coding, database_migration, auth_security_change, production_deploy, dependency_upgrade, large_refactor, secrets_risk, or infrastructure_change.",
+              },
+              confidence: {
+                type: "number",
+                description: "Host confidence from 0 to 1.",
+              },
+              summary: {
+                type: "string",
+                description:
+                  "Short host-visible reason for the classification. Do not include secrets, raw diffs, or chain-of-thought.",
+              },
+            },
+          },
         },
         required: ["request"],
       },
@@ -52,18 +80,27 @@ export async function handlePromptItToolCall(name: string, args: unknown) {
 }
 
 function handlePreflightRequest(input: unknown) {
-  const { request, repoPath } = parsePreflightArgs(input);
+  const { request, repoPath, hostClassification } = parsePreflightArgs(input);
   const facts = inspectRepo(resolveRepoPath(repoPath));
-  const riskType = classifyRisk(request, facts);
+  const localRiskType = classifyLocalRisk(request, facts);
+  const riskType = selectRiskType(localRiskType, hostClassification);
   const policy = POLICIES[riskType];
   const blockedReasons = policy.blockedWhen?.(facts, request) ?? [];
   const decision: Decision = blockedReasons.length > 0 ? "block" : policy.decision;
-  const evidence = buildEvidence(request, facts, riskType, blockedReasons);
+  const evidence = buildEvidence(request, facts, riskType, localRiskType, hostClassification, blockedReasons);
 
   return {
     protocol: "promptit.preflight.v1",
     decision,
     risk_type: riskType,
+    local_risk_type: localRiskType,
+    host_classification: hostClassification
+      ? {
+          risk_type: hostClassification.riskType,
+          confidence: hostClassification.confidence,
+          summary: hostClassification.summary,
+        }
+      : null,
     severity: policy.severity,
     evidence,
     required_checks: policy.requiredChecks,
@@ -114,7 +151,7 @@ function inspectRepo(repoPath: string): RepoFacts {
   };
 }
 
-function classifyRisk(request: string, facts: RepoFacts): RiskType {
+function classifyLocalRisk(request: string, facts: RepoFacts): RiskType {
   const text = request.toLowerCase();
   if (facts.secret_findings > 0 || hasWords(text, ["secret", "api key", "token", "private key", ".env"])) {
     return "secrets_risk";
@@ -143,14 +180,49 @@ function classifyRisk(request: string, facts: RepoFacts): RiskType {
   return "safe_simple";
 }
 
+function selectRiskType(localRiskType: RiskType, hostClassification?: HostClassification): RiskType {
+  if (isHardRisk(localRiskType)) return localRiskType;
+  if (!hostClassification?.riskType || hostClassification.confidence === undefined) return localRiskType;
+  if (hostClassification.confidence < 0.65) return localRiskType;
+  if (hostClassification.riskType === "safe_simple" && localRiskType !== "safe_simple") return localRiskType;
+  if (riskRank(hostClassification.riskType) < riskRank(localRiskType)) return localRiskType;
+  return hostClassification.riskType;
+}
+
+function isHardRisk(riskType: RiskType): boolean {
+  return riskType === "secrets_risk" || riskType === "database_migration";
+}
+
+function riskRank(riskType: RiskType): number {
+  const rank: Record<RiskType, number> = {
+    safe_simple: 0,
+    normal_coding: 1,
+    dependency_upgrade: 2,
+    large_refactor: 2,
+    infrastructure_change: 3,
+    auth_security_change: 3,
+    production_deploy: 3,
+    database_migration: 4,
+    secrets_risk: 5,
+  };
+  return rank[riskType];
+}
+
 function buildEvidence(
   request: string,
   facts: RepoFacts,
   riskType: RiskType,
+  localRiskType: RiskType,
+  hostClassification: HostClassification | undefined,
   blockedReasons: string[]
 ): string[] {
   const evidence = [...blockedReasons];
   if (riskType !== "safe_simple") evidence.push(`classified request as ${riskType}`);
+  if (riskType !== localRiskType) evidence.push(`host classification raised risk from ${localRiskType}`);
+  if (hostClassification?.riskType && hostClassification.confidence !== undefined) {
+    evidence.push(`host suggested ${hostClassification.riskType} with confidence ${hostClassification.confidence}`);
+  }
+  if (hostClassification?.summary) evidence.push(`host summary: ${hostClassification.summary}`);
   if (facts.branch) evidence.push(`current branch: ${facts.branch}`);
   if (facts.dirty_files > 0) evidence.push(`${facts.dirty_files} changed file(s) detected`);
   if (facts.migration_files_changed.length > 0) evidence.push("migration files changed");
@@ -192,6 +264,7 @@ function parsePreflightArgs(input: unknown): PreflightArgs {
   const args = (input ?? {}) as Record<string, unknown>;
   const requestRaw = args.request;
   const repoPathRaw = args.repo_path;
+  const hostClassificationRaw = args.host_classification;
   assertString(requestRaw, "request");
   assertOptionalString(repoPathRaw, "repo_path");
   if (requestRaw.length > MAX_TEXT_CHARS) {
@@ -200,6 +273,43 @@ function parsePreflightArgs(input: unknown): PreflightArgs {
   return {
     request: requestRaw,
     repoPath: typeof repoPathRaw === "string" ? repoPathRaw : undefined,
+    hostClassification: parseHostClassification(hostClassificationRaw),
+  };
+}
+
+function parseHostClassification(value: unknown): HostClassification | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("host_classification must be an object when provided.");
+  }
+
+  const raw = value as Record<string, unknown>;
+  const riskTypeRaw = raw.risk_type;
+  const confidenceRaw = raw.confidence;
+  const summaryRaw = raw.summary;
+
+  assertOptionalString(riskTypeRaw, "host_classification.risk_type");
+  assertOptionalString(summaryRaw, "host_classification.summary");
+
+  if (riskTypeRaw !== undefined && !isRiskType(riskTypeRaw)) {
+    throw new Error("host_classification.risk_type is not recognized.");
+  }
+  if (
+    confidenceRaw !== undefined &&
+    (typeof confidenceRaw !== "number" || !Number.isFinite(confidenceRaw) || confidenceRaw < 0 || confidenceRaw > 1)
+  ) {
+    throw new Error("host_classification.confidence must be a number from 0 to 1.");
+  }
+  if (typeof summaryRaw === "string" && summaryRaw.length > 500) {
+    throw new Error("host_classification.summary cannot exceed 500 characters.");
+  }
+
+  if (riskTypeRaw === undefined && confidenceRaw === undefined && summaryRaw === undefined) return undefined;
+
+  return {
+    riskType: typeof riskTypeRaw === "string" ? riskTypeRaw : undefined,
+    confidence: typeof confidenceRaw === "number" ? confidenceRaw : undefined,
+    summary: typeof summaryRaw === "string" ? redactSecretLikeText(summaryRaw) : undefined,
   };
 }
 
@@ -285,8 +395,20 @@ function countSecretFindings(diff: string): number {
   return count;
 }
 
+function redactSecretLikeText(value: string): string {
+  let redacted = value;
+  for (const pattern of SECRET_PATTERNS) {
+    redacted = redacted.replace(pattern, "[REDACTED]");
+  }
+  return redacted;
+}
+
 function hasWords(input: string, words: string[]): boolean {
   return words.some((word) => input.includes(word));
+}
+
+function isRiskType(value: string): value is RiskType {
+  return Object.prototype.hasOwnProperty.call(POLICIES, value);
 }
 
 function assertString(value: unknown, name: string): asserts value is string {

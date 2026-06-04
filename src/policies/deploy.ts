@@ -10,8 +10,8 @@ export const productionDeployPolicy: Policy = {
     "identify rollback plan",
     "require explicit user confirmation before push/deploy",
   ],
-  blockedWhen: (facts, request) =>
-    (facts.branch === "main" || facts.branch === "master") && /push|deploy|release/i.test(request)
-      ? ["push/deploy requested while on main/master"]
+  blockedWhen: (facts) =>
+    facts.branch === "main" || facts.branch === "master"
+      ? ["production deploy risk detected on main/master branch"]
       : [],
 };
