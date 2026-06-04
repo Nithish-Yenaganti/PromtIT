@@ -1,8 +1,6 @@
 import {
-  DEFAULT_CHARS_PER_TOKEN,
   EXECUTION_TOKEN_TTL_MS,
   MAX_TEXT_CHARS,
-  parsePositiveNumberEnv,
 } from "./config";
 import { scheduleAdaptiveCategorySync } from "./adaptiveSync";
 import {
@@ -249,7 +247,7 @@ function handleRegeneratePrompt(input: unknown) {
 }
 
 function handleCommitPrompt(input: unknown) {
-  const { taskId, executionToken, finalPrompt, destination } = parseCommitArgs(input);
+  const { taskId, executionToken, finalPrompt } = parseCommitArgs(input);
   const session = validateSession(taskId, executionToken);
   if (!session.rawText) {
     fail(
@@ -273,8 +271,6 @@ function handleCommitPrompt(input: unknown) {
   }
 
   const sanitizedFinal = redactSensitiveText(promptToCommit);
-  const notices: string[] = [];
-  const tokenReport = buildTokenDiffReport(session.rawText, sanitizedFinal.text);
   const wasEdited = session.currentPrompt !== undefined && sanitizedFinal.text !== session.currentPrompt;
   recordTemplateStat(session.templateId, "accepted");
   recordTemplateStat(session.templateId, "executed");
@@ -290,24 +286,10 @@ function handleCommitPrompt(input: unknown) {
   session.committed = true;
   refinementSessions.delete(taskId);
 
-  if (sanitizedFinal.redacted) {
-    notices.push("Potential secrets were redacted before persistence.");
-  }
-
   return jsonToolResult({
-    ...buildReviewPayload({
-      session,
-      originalPrompt: session.rawText,
-      convertedPrompt: sanitizedFinal.text,
-      status: "committed",
-      destination: destination ?? "host",
-      tokenReport,
-      templateMatch: session.templateMatch,
-      notices,
-    }),
+    protocol: "promptit.review.v1",
+    status: "committed",
     final_prompt: sanitizedFinal.text,
-    send_instruction:
-      "Host should now send final_prompt to the selected destination. PromptIT does not own delivery.",
   });
 }
 
@@ -362,9 +344,17 @@ function buildReviewPayload(args: {
   templateMatch?: TemplateMatch;
   notices?: string[];
   regenerationInstruction?: string;
-  destination?: string;
-  tokenReport?: string;
 }) {
+  const includeHostRefinementMetadata = Boolean(args.conversionInput);
+
+  if (args.status === "ready_for_review" && args.convertedPrompt) {
+    return {
+      protocol: "promptit.review.v1",
+      status: args.status,
+      converted_prompt: args.convertedPrompt,
+    };
+  }
+
   return {
     protocol: "promptit.review.v1",
     status: args.status,
@@ -376,8 +366,9 @@ function buildReviewPayload(args: {
     original_prompt: args.originalPrompt,
     converted_prompt: args.convertedPrompt ?? null,
     revision_count: args.session.revisionCount,
-    selected_template: args.templateMatch
-      ? {
+    selected_template:
+      includeHostRefinementMetadata && args.templateMatch
+        ? {
           id: args.templateMatch.template.id,
           name: args.templateMatch.template.name,
           source: args.templateMatch.template.source,
@@ -387,7 +378,7 @@ function buildReviewPayload(args: {
           score: Number(args.templateMatch.score.toFixed(4)),
           reasons: args.templateMatch.reasons,
         }
-      : undefined,
+        : undefined,
     conversion_context: args.conversionInput
       ? {
           payload: args.conversionInput,
@@ -397,9 +388,7 @@ function buildReviewPayload(args: {
         }
       : undefined,
     regeneration_instruction: args.regenerationInstruction,
-    destination: args.destination,
-    token_report: args.tokenReport,
-    notices: args.notices?.filter(Boolean) ?? [],
+    notices: args.notices?.filter(Boolean).length ? args.notices.filter(Boolean) : undefined,
   };
 }
 
@@ -562,53 +551,6 @@ function assertOptionalString(value: unknown, name: string): asserts value is st
   if (value !== undefined && (typeof value !== "string" || !value.trim())) {
     throw new Error(`${name} must be a non-empty string when provided.`);
   }
-}
-
-function buildTokenDiffReport(rawText: string, refinedText: string): string {
-  const rawTokens = estimateTokens(rawText);
-  const refinedTokens = estimateTokens(refinedText);
-  const savedTokens = rawTokens - refinedTokens;
-  const reductionPercent = rawTokens > 0 ? (savedTokens / rawTokens) * 100 : 0;
-
-  const reportLines = [
-    "Token Usage (Estimated):",
-    `- Raw messy text: ${rawTokens} tokens`,
-    `- Refined prompt: ${refinedTokens} tokens`,
-    `- Difference: ${savedTokens >= 0 ? "-" : "+"}${Math.abs(savedTokens)} tokens`,
-    `- Reduction: ${reductionPercent.toFixed(2)}%`,
-  ];
-
-  const inputCostPer1k = parsePositiveNumberEnv("PROMPTIT_INPUT_COST_PER_1K");
-  if (inputCostPer1k !== null) {
-    const rawCost = (rawTokens / 1000) * inputCostPer1k;
-    const refinedCost = (refinedTokens / 1000) * inputCostPer1k;
-    const savedCost = rawCost - refinedCost;
-    reportLines.push(
-      "",
-      `Cost Impact (using PROMPTIT_INPUT_COST_PER_1K=${inputCostPer1k}):`,
-      `- Raw estimated input cost: ${formatUsd(rawCost)}`,
-      `- Refined estimated input cost: ${formatUsd(refinedCost)}`,
-      `- Estimated savings: ${savedCost >= 0 ? "-" : "+"}${formatUsd(Math.abs(savedCost))}`
-    );
-  } else {
-    reportLines.push(
-      "",
-      "Cost Impact:",
-      "- Set PROMPTIT_INPUT_COST_PER_1K to include dollar estimates automatically."
-    );
-  }
-
-  return reportLines.join("\n");
-}
-
-function estimateTokens(text: string): number {
-  const normalizedLength = text.trim().length;
-  if (normalizedLength <= 0) return 0;
-  return Math.ceil(normalizedLength / DEFAULT_CHARS_PER_TOKEN);
-}
-
-function formatUsd(amount: number): string {
-  return `$${amount.toFixed(6)}`;
 }
 
 function fail(code: string, message: string): never {

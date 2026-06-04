@@ -154,7 +154,33 @@ test("review payloads do not expose user-visible action button hints", async () 
   expect(secondPayload.actions).toBeUndefined();
   expect(secondPayload.tools).toBeUndefined();
   expect(secondPayload.plan).toBeUndefined();
+  expect(secondPayload.task_id).toBeUndefined();
+  expect(secondPayload.execution_token).toBeUndefined();
+  expect(secondPayload.original_prompt).toBeUndefined();
+  expect(secondPayload.revision_count).toBeUndefined();
+  expect(secondPayload.selected_template).toBeUndefined();
+  expect(secondPayload.conversion_context).toBeUndefined();
+  expect(secondPayload.destination).toBeUndefined();
+  expect(secondPayload.token_report).toBeUndefined();
+  expect(secondPayload.send_instruction).toBeUndefined();
+  expect(secondPayload.notices).toBeUndefined();
   expect(secondPayload.converted_prompt).toBe("Rewrite the request into a concise prompt.");
+
+  const committed = await handlePromptItToolCall("commit_prompt", {
+    task_id: firstPayload.task_id,
+    execution_token: firstPayload.execution_token,
+  });
+  const committedText = committed.content[0];
+  if (!committedText || committedText.type !== "text") {
+    throw new Error("Expected text tool result.");
+  }
+  const committedPayload = JSON.parse(committedText.text);
+
+  expect(committedPayload).toEqual({
+    protocol: "promptit.review.v1",
+    status: "committed",
+    final_prompt: "Rewrite the request into a concise prompt.",
+  });
 });
 
 test("validates required template fields and quality score", () => {

@@ -218,28 +218,10 @@ bun run promptit -- sync --categories coding --limit 3
 {
   "protocol": "promptit.review.v1",
   "status": "ready_for_review",
-  "task_id": "...",
-  "execution_token": "...",
-  "original_prompt": "...",
-  "converted_prompt": "...",
-  "selected_template": {
-    "id": "prompts-chat.coding-change.v1",
-    "name": "Coding Change Request",
-    "source": "prompts.chat",
-    "score": 0.8125,
-    "reasons": ["intent:coding", "matched:code,repo,build"]
-  }
+  "converted_prompt": "..."
 }
 ```
 
 ## Data Policy
 
 PromptIT persists only template metadata and aggregate template stats by default. It does not persist raw user prompts, generated prompts, chat history, or execution logs.
-
-## Token/Cost Visibility
-
-`commit_prompt` returns an estimated token comparison for the in-memory messy prompt and final prompt. Optional cost estimation is enabled by setting:
-
-```bash
-PROMPTIT_INPUT_COST_PER_1K=0.005
-```
