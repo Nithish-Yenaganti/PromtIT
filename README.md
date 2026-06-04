@@ -13,6 +13,24 @@ PromptIT is a local-first MCP safety preflight for AI coding agents. It checks a
 
 PromptIT is not a prompt cleaner. It is a repo-aware risk gate for dangerous coding workflows.
 
+## Why MCP?
+
+PromptIT needs MCP because it is not just advice written in a file. It needs to inspect live repo state, read git status, detect changed migration/auth/deploy/dependency files, scan diffs for secret-looking values, and return a structured decision that the host can enforce before the agent acts.
+
+That makes it a tool, not only an instruction. MCP gives PromptIT a callable boundary where the host can ask, "Is this request safe to execute right now in this repo?" and receive a machine-readable answer like `allow`, `warn`, `needs_confirmation`, or `block`.
+
+## Why Not Just SKILL.md?
+
+A `SKILL.md` file is useful for teaching an agent how to behave, but it is still mostly guidance. It can say "be careful with migrations" or "check for secrets," but it cannot reliably inspect the current repository, count dirty files, detect the active branch, or produce a consistent policy decision on its own.
+
+PromptIT and `SKILL.md` can work together, but they solve different problems. `SKILL.md` is like a driving lesson; PromptIT is like the seat belt and warning system that checks the actual car before you start moving.
+
+## Why Choose PromptIT?
+
+People should choose PromptIT when they want AI coding agents to move fast without blindly touching dangerous parts of a codebase. It is especially useful for teams or solo developers who let agents edit, test, commit, push, deploy, modify dependencies, or change database/auth/security code.
+
+The seat belt example is the simplest way to think about it: a good driver still wears a seat belt, not because they are bad at driving, but because one mistake can be expensive. Modern coding agents are strong, but PromptIT adds a safety layer for the moments where one wrong action can leak a secret, break production, damage a schema, or push risky changes from the wrong branch.
+
 ## What It Catches
 
 - Database migrations and schema changes
