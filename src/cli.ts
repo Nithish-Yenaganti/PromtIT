@@ -2,37 +2,19 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import os from "os";
 import path from "path";
-import { initDatabase, listSyncQueueItems } from "./database";
-import {
-  bootstrapPromptsChatTemplates,
-  parseRetryAfterSeconds,
-  syncPromptsChatTemplates,
-} from "./promptsChatSync";
-import {
-  PROMPTS_CHAT_CATEGORY_PRESETS,
-  PROMPTS_CHAT_CATEGORY_SLUGS,
-  PROMPTS_CHAT_PUBLIC_CATEGORIES,
-  validatePromptsChatCategories,
-} from "./promptsChatCategories";
 
 type Host = "codex" | "claude" | string;
 
 type CliOptions = {
   args: string[];
   host?: Host;
-  categories?: string[];
-  preset?: string;
   dryRun: boolean;
   printConfig: boolean;
   uninstall: boolean;
-  force: boolean;
-  resume: boolean;
-  limit?: number;
 };
 
 const rootDir = path.resolve(import.meta.dir, "..");
 const serverPath = path.join(rootDir, "src", "server.ts");
-const dbPath = path.join(rootDir, "data", "promptit.db");
 const managedStart = "# >>> PromptIT MCP managed block >>>";
 const managedEnd = "# <<< PromptIT MCP managed block <<<";
 
@@ -48,20 +30,21 @@ async function main(): Promise<void> {
     runDoctor();
     return;
   }
-  if (command === "categories") {
-    printCategories();
-    return;
-  }
-  if (command === "sync") {
-    await runSync(options);
+  if (command === "setup") {
+    options.host ??= "codex";
+    runInstall(options, true);
     return;
   }
 
   if (!options.host) {
-    throw new Error("Use --codex, --claude, --host <name>, doctor, categories, or sync.");
+    throw new Error("Use setup, --codex, --claude, --host <name>, doctor, or --help.");
   }
 
-  ensureRuntimeDirs();
+  runInstall(options, false);
+}
+
+function runInstall(options: CliOptions, runDoctorAfter: boolean): void {
+  if (!options.host) throw new Error("Host is required for install.");
   if (options.printConfig || options.dryRun) {
     printInstallPreview(options.host);
   } else if (options.uninstall) {
@@ -74,8 +57,9 @@ async function main(): Promise<void> {
     writeGenericHostConfig(options.host);
   }
 
-  if (!options.uninstall && !options.printConfig) {
-    await maybeBootstrapSelectedCategories(options);
+  if (runDoctorAfter && !options.dryRun && !options.printConfig) {
+    process.stdout.write("\n");
+    runDoctor();
   }
 }
 
@@ -85,8 +69,6 @@ function parseOptions(args: string[]): CliOptions {
     dryRun: false,
     printConfig: false,
     uninstall: false,
-    force: false,
-    resume: false,
   };
 
   for (let i = 0; i < args.length; i += 1) {
@@ -98,94 +80,15 @@ function parseOptions(args: string[]): CliOptions {
       if (!value) throw new Error("--host requires a host name.");
       options.host = value;
       i += 1;
-    } else if (arg === "--categories") {
-      const value = args[i + 1]?.trim();
-      if (!value) throw new Error("--categories requires comma-separated category slugs.");
-      options.categories = splitCsv(value);
-      i += 1;
-    } else if (arg === "--preset") {
-      const value = args[i + 1]?.trim();
-      if (!value) throw new Error("--preset requires a preset name.");
-      options.preset = value;
-      i += 1;
-    } else if (arg === "--limit") {
-      const value = Number(args[i + 1]);
-      if (!Number.isFinite(value) || value <= 0) throw new Error("--limit requires a positive number.");
-      options.limit = Math.floor(value);
-      i += 1;
     } else if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--print-config") options.printConfig = true;
     else if (arg === "--uninstall") options.uninstall = true;
-    else if (arg === "--force") options.force = true;
-    else if (arg === "--resume") options.resume = true;
     else if (arg?.startsWith("--") && arg.length > 2 && !knownFlag(arg)) {
       options.host = arg.slice(2);
     }
   }
 
   return options;
-}
-
-async function runSync(options: CliOptions): Promise<void> {
-  ensureRuntimeDirs();
-  const categories = resolveSelectedCategories(options);
-  if (categories.length > 0 || options.resume) {
-    const result = await bootstrapPromptsChatTemplates({
-      categories,
-      templatesPerCategory: options.limit ?? 1,
-      dryRun: options.dryRun,
-      force: options.force,
-      resume: options.resume,
-    });
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    return;
-  }
-
-  const result = await syncPromptsChatTemplates({
-    limit: options.limit,
-    dryRun: options.dryRun,
-  });
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-}
-
-async function maybeBootstrapSelectedCategories(options: CliOptions): Promise<void> {
-  const categories = resolveSelectedCategories(options);
-  if (categories.length === 0 && !options.resume) return;
-
-  const result = await bootstrapPromptsChatTemplates({
-    categories,
-    templatesPerCategory: options.limit ?? 1,
-    dryRun: options.dryRun,
-    force: options.force,
-    resume: options.resume,
-  });
-  const rateLimited = result.categories.find((item) => parseRetryAfterSeconds(item.reason ?? ""));
-  process.stdout.write(
-    `PromptIT category sync: imported=${result.totals.imported_count}, failed=${result.totals.failed_count}\n`
-  );
-  if (rateLimited?.reason) {
-    process.stdout.write(`prompts.chat rate limited sync; retry later with: promptit sync --resume\n`);
-  }
-}
-
-function resolveSelectedCategories(options: CliOptions): string[] {
-  const presetCategories = options.preset ? categoriesForPreset(options.preset) : [];
-  const categories = Array.from(new Set([...(options.categories ?? []), ...presetCategories]));
-  const invalid = validatePromptsChatCategories(categories);
-  if (invalid.length > 0) {
-    throw new Error(`Unknown prompts.chat category slug(s): ${invalid.join(", ")}`);
-  }
-  return categories;
-}
-
-function categoriesForPreset(preset: string): string[] {
-  const categories = PROMPTS_CHAT_CATEGORY_PRESETS[preset];
-  if (!categories) {
-    throw new Error(
-      `Unknown preset "${preset}". Available presets: ${Object.keys(PROMPTS_CHAT_CATEGORY_PRESETS).join(", ")}`
-    );
-  }
-  return categories;
 }
 
 function installCodex(): void {
@@ -208,6 +111,7 @@ function installClaude(): void {
 
   backupIfExists(configPath);
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  writeHostInstructions("claude");
   printSuccess("Claude", configPath);
 }
 
@@ -229,44 +133,39 @@ function uninstallHost(host: Host): void {
     backupIfExists(configPath);
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
     process.stdout.write(`Removed PromptIT from Claude config: ${configPath}\n`);
+    process.stdout.write(`Delete this instructions file if present:\n${hostInstructionsPath("claude")}\n`);
     return;
   }
   const safeHost = safeHostName(host);
   const outputPath = path.join(rootDir, `promptit.${safeHost}.mcp.json`);
   process.stdout.write(`Delete this generic config file if present:\n${outputPath}\n`);
+  process.stdout.write(`Delete this instructions file if present:\n${hostInstructionsPath(safeHost)}\n`);
 }
 
 function writeGenericHostConfig(host: string): void {
   const safeHost = safeHostName(host);
   const outputPath = path.join(rootDir, `promptit.${safeHost}.mcp.json`);
   writeFileSync(outputPath, `${JSON.stringify({ mcpServers: { prompt_it: renderMcpJsonServer() } }, null, 2)}\n`);
+  const instructionsPath = writeHostInstructions(safeHost);
   process.stdout.write(`Wrote generic PromptIT MCP config for "${host}" to:\n${outputPath}\n`);
+  process.stdout.write(`Wrote PromptIT host instructions to:\n${instructionsPath}\n`);
 }
 
 function runDoctor(): void {
-  ensureRuntimeDirs();
-  initDatabase();
   const checks = [
     ["Bun runtime", Bun.version ? `ok (${Bun.version})` : "missing"],
     ["Server file", existsSync(serverPath) ? "ok" : `missing: ${serverPath}`],
-    ["Database directory", existsSync(path.dirname(dbPath)) ? "ok" : `missing: ${path.dirname(dbPath)}`],
-    ["Database path", dbPath],
     ["Codex config", existsSync(codexConfigPath()) ? `present: ${codexConfigPath()}` : "not installed"],
     ["Claude config", existsSync(claudeConfigPath()) ? `present: ${claudeConfigPath()}` : "not installed"],
-    ["Queued sync items", String(listSyncQueueItems().length)],
+    [
+      "Claude instructions",
+      existsSync(hostInstructionsPath("claude")) ? `present: ${hostInstructionsPath("claude")}` : "not generated",
+    ],
   ];
   process.stdout.write("PromptIT doctor\n\n");
   for (const [label, value] of checks) {
     process.stdout.write(`${label}: ${value}\n`);
   }
-}
-
-function printCategories(): void {
-  process.stdout.write("PromptIT prompts.chat categories\n\n");
-  for (const item of PROMPTS_CHAT_PUBLIC_CATEGORIES) {
-    process.stdout.write(`${item.category}\n`);
-  }
-  process.stdout.write(`\nPresets: ${Object.keys(PROMPTS_CHAT_CATEGORY_PRESETS).join(", ")}\n`);
 }
 
 function printInstallPreview(host: Host): void {
@@ -275,7 +174,8 @@ function printInstallPreview(host: Host): void {
     return;
   }
   const config = { mcpServers: { prompt_it: renderMcpJsonServer() } };
-  process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(config, null, 2)}\n\n`);
+  process.stdout.write(`${renderGenericHostInstructions(host)}\n`);
 }
 
 function renderCodexBlock(): string {
@@ -286,29 +186,48 @@ function renderCodexBlock(): string {
     `args = ["run", "${escapeToml(serverPath)}"]`,
     `cwd = "${escapeToml(rootDir)}"`,
     "",
-    "[mcp_servers.prompt_it.env]",
-    `PROMPTIT_DB_PATH = "${escapeToml(dbPath)}"`,
-    "",
-    "[agents.prompt_engineer]",
-    'description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."',
+    "[agents.promptit_preflight]",
+    'description = "Repo-aware safety preflight for risky AI coding agent workflows."',
     'mcp_servers = ["prompt_it"]',
     'developer_instructions = """',
-    "You are the orchestration layer only.",
-    "Follow PROMPTENGINEER.md as the single source of truth for refinement policy.",
-    "For each messy request:",
-    "0. For medium/large/ambiguous tasks, do not run web search, file edits, code execution, or any other tool before normalize_prompt.",
-    "0b. Tiny mechanical tasks may skip PromptIT.",
-    "1. Call prompt_it.normalize_prompt with messy_text.",
-    "2. If status is needs_host_refinement, use conversion_context.payload to generate converted_prompt with the host LLM.",
-    "3. Call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.",
-    "4. Show Converted Prompt and concise edit/regenerate/send actions.",
-    "5. Use prompt_it.regenerate_prompt when the user requests changes.",
-    "6. When approved, call prompt_it.commit_prompt with final_prompt and destination.",
-    "7. Execute/send the returned final_prompt.",
+    ...renderHostPolicyLines(),
     '"""',
     managedEnd,
     "",
   ].join("\n");
+}
+
+function writeHostInstructions(host: string): string {
+  const safeHost = safeHostName(host);
+  const outputPath = hostInstructionsPath(safeHost);
+  writeFileSync(outputPath, `${renderGenericHostInstructions(host)}\n`);
+  return outputPath;
+}
+
+function renderGenericHostInstructions(host: string): string {
+  return [
+    `# PromptIT Instructions for ${host}`,
+    "",
+    "Add this text to the host's custom instructions, project instructions, system prompt, or equivalent policy area.",
+    "",
+    ...renderHostPolicyLines(),
+  ].join("\n");
+}
+
+function renderHostPolicyLines(): string[] {
+  return [
+    "You are the orchestration layer only.",
+    "Use PromptIT as a repo-aware safety preflight before risky coding work.",
+    "Skip PromptIT for tiny mechanical tasks, simple questions, and ordinary low-risk edits.",
+    "Before executing any non-tiny coding request:",
+    "1. Silently classify the user's request into a likely PromptIT risk_type with confidence and a short summary.",
+    "2. Silently call prompt_it.preflight_request with request set to the user's raw request, repo_path set to the active workspace path when available, and host_classification set to that classification.",
+    "3. If decision is skip or allow, proceed normally.",
+    "4. If decision is warn, apply host_instruction before editing and include required checks in your work.",
+    "5. If decision is needs_confirmation, show the user the risk summary and required checks, then wait for confirmation before dangerous actions.",
+    "6. If decision is block, do not continue until the blocking condition is resolved.",
+    "Do not use PromptIT to rewrite normal prompts. PromptIT is a safety gate, not a prompt cleaner.",
+  ];
 }
 
 function renderMcpJsonServer(): Record<string, unknown> {
@@ -316,9 +235,6 @@ function renderMcpJsonServer(): Record<string, unknown> {
     command: "bun",
     args: ["run", serverPath],
     cwd: rootDir,
-    env: {
-      PROMPTIT_DB_PATH: dbPath,
-    },
   };
 }
 
@@ -364,21 +280,14 @@ function backupIfExists(filePath: string): void {
   writeFileSync(backupPath, readFileSync(filePath));
 }
 
-function ensureRuntimeDirs(): void {
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-}
-
 function safeHostName(host: string): string {
   const safeHost = host.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!safeHost) throw new Error("Host name must contain at least one letter or number.");
   return safeHost;
 }
 
-function splitCsv(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
+function hostInstructionsPath(host: string): string {
+  return path.join(rootDir, `promptit.${safeHostName(host)}.instructions.md`);
 }
 
 function knownFlag(arg: string): boolean {
@@ -386,14 +295,9 @@ function knownFlag(arg: string): boolean {
     "--codex",
     "--claude",
     "--host",
-    "--categories",
-    "--preset",
-    "--limit",
     "--dry-run",
     "--print-config",
     "--uninstall",
-    "--force",
-    "--resume",
     "--help",
     "-h",
   ]).has(arg);
@@ -438,22 +342,16 @@ function printHelp(): void {
       "PromptIT MCP installer",
       "",
       "Install:",
-      "  promptit --codex --preset developer",
-      "  promptit --claude --categories coding,technical-writing",
+      "  promptit setup",
+      "  promptit setup --claude",
+      "  promptit --codex",
       "  promptit --host my-host --print-config",
       "  promptit --cursor",
       "",
-      "Sync:",
-      "  promptit sync --preset developer --limit 1",
-      "  promptit sync --categories coding,writing --limit 1",
-      "  promptit sync --resume",
-      "",
       "Utility:",
       "  promptit doctor",
-      "  promptit categories",
       "  promptit --codex --uninstall",
       "",
-      "Presets: developer, writer, business, creative, productivity, all",
       "Unknown hosts create a generic promptit.<host>.mcp.json file in this repo.",
       "",
     ].join("\n")

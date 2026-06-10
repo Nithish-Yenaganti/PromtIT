@@ -7,239 +7,213 @@
 ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚═╝        ╚═╝   ╚═╝   ╚═╝
 ```
 
-
-[![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 # PromptIT MCP Server
 
+PromptIT is a local-first MCP safety preflight for AI coding agents. It checks a user request against live repo state before the agent starts risky work, then returns `skip`, `allow`, `warn`, `needs_confirmation`, or `block`.
 
-PromptIT is a local-first Model Context Protocol (MCP) server that turns messy user requests into reviewable prompt payloads using prompts.chat-style templates. It stays a tool layer, not an app: the MCP host owns the UI, the host LLM performs the actual rewrite, and PromptIT coordinates template selection, review state, and lightweight template stats.
+PromptIT is not a prompt cleaner. It is a repo-aware risk gate for dangerous coding workflows.
 
-## Core Logic
+## Why MCP?
 
-PromptIT no longer runs embedding models and no longer stores raw prompt history in the core path. The runtime is now:
+PromptIT needs MCP because it is not just advice written in a file. It needs to inspect live repo state, read git status, detect changed migration/auth/deploy/dependency files, scan diffs for secret-looking values, and return a structured decision that the host can enforce before the agent acts.
 
-1. Template Routing: classify the messy request with deterministic keyword/tag rules.
-2. Template Selection: choose the best cached prompts.chat-style template using intent, tags, quality score, and aggregate stats.
-3. Host LLM Payload: return the messy request plus selected template instructions so the host LLM can generate the refined prompt.
-4. Review Protocol: return `promptit.review.v1` payloads for edit, regenerate, and send/execute.
-5. Minimal Learning: store only template-level counters such as selected, edited, regenerated, accepted, rejected, and executed counts.
+That makes it a tool, not only an instruction. MCP gives PromptIT a callable boundary where the host can ask, "Is this request safe to execute right now in this repo?" and receive a machine-readable answer like `allow`, `warn`, `needs_confirmation`, or `block`.
 
-## System Architecture
+## Why Not Just SKILL.md?
 
-The project is divided into five small modules:
+A `SKILL.md` file is useful for teaching an agent how to behave, but it is still mostly guidance. It can say "be careful with migrations" or "check for secrets," but it cannot reliably inspect the current repository, count dirty files, detect the active branch, or produce a consistent policy decision on its own.
 
-* `src/server.ts`: MCP server setup, stdio transport, and tool registration.
-* `src/database.ts`: SQLite template cache and aggregate template stats.
-* `src/templates.ts`: deterministic template ranking and event scoring.
-* `src/refiner.ts`: PromptIT review protocol for normalize, regenerate, and commit.
-* `src/config.ts`: DB paths, token limits, and runtime thresholds.
+PromptIT and `SKILL.md` can work together, but they solve different problems. `SKILL.md` is like a driving lesson; PromptIT is like the seat belt and warning system that checks the actual car before you start moving.
+
+## Why Choose PromptIT?
+
+People should choose PromptIT when they want AI coding agents to move fast without blindly touching dangerous parts of a codebase. It is especially useful for teams or solo developers who let agents edit, test, commit, push, deploy, modify dependencies, or change database/auth/security code.
+
+The seat belt example is the simplest way to think about it: a good driver still wears a seat belt, not because they are bad at driving, but because one mistake can be expensive. Modern coding agents are strong, but PromptIT adds a safety layer for the moments where one wrong action can leak a secret, break production, damage a schema, or push risky changes from the wrong branch.
+
+## What It Catches
+
+- Database migrations and schema changes
+- Auth, session, cookie, token, and permission changes
+- Push, deploy, release, and production-sensitive requests
+- Dependency upgrades and lockfile changes
+- Large refactors
+- Secret-looking values in diffs
+- Infrastructure and CI/deploy config changes
+
+## Policy Structure
+
+Runtime policies live in `src/policies/` as typed source modules. Each risk area has its own file, and `src/policies/index.ts` exports the combined policy map used by `src/preflight.ts`.
+
+```text
+src/policies/
+  auth.ts
+  database.ts
+  dependencies.ts
+  deploy.ts
+  infrastructure.ts
+  normalCoding.ts
+  refactor.ts
+  safeSimple.ts
+  secrets.ts
+  types.ts
+```
+
+PromptIT does not use Markdown policy files for enforcement. Markdown is only documentation; the executable safety decisions stay in typed code so they can be tested and kept deterministic.
+
+To change an existing policy, edit the matching file in `src/policies/` and update the tests that cover the expected decision. To add a new risk type, add it to `src/policies/types.ts`, create a new policy file, export it from `src/policies/index.ts`, and update the classifier in `src/preflight.ts`.
+
+Each policy controls:
+
+- `riskType`: the stable machine-readable risk id.
+- `severity`: `low`, `medium`, `high`, or `critical`.
+- `decision`: `skip`, `allow`, `warn`, `needs_confirmation`, or `block`.
+- `requiredChecks`: the checks the host should follow before risky work.
+- `blockedWhen`: optional hard-stop logic based on live repo facts.
 
 ## Project Structure
 
 ```text
-promptit-mcp/
-├── src/
-│   ├── server.ts      # Core MCP server setup and tool registration
-│   ├── database.ts    # SQLite template cache and aggregate stats
-│   ├── templates.ts   # Template routing and ranking
-│   ├── refiner.ts     # Review protocol and host-LLM payload orchestration
-│   └── config.ts      # DB paths, limits, thresholds
-├── scripts/
-│   ├── render-codex-config.sh
-│   └── fetch-prompts-chat-engineering.ts
-├── config.example.toml
-├── PROMPTENGINEER.md
-├── package.json       # Bun/TypeScript dependencies and scripts
-└── README.md
+src/server.ts       # MCP stdio server and tool registration
+src/preflight.ts    # repo inspection, risk classification, response building
+src/policies/       # executable policy definitions
+src/cli.ts          # one-command host installer and generated instructions
+src/config.ts       # small runtime constants
+tests/              # behavior and policy-registry tests
 ```
 
-## Why MCP?
+There is no prompt-refiner layer, no prompts.chat ingestion, no database module, and no `PROMPTENGINEER.md`. PromptIT is intentionally a narrow safety preflight tool.
 
-MCP gives PromptIT a clean tool boundary. The server can select templates, return structured review payloads, and update template stats while the host app renders the review screen and sends the final prompt to the actual agent.
+## Runtime Flow
+
+```text
+User request
+   |
+Host LLM silently suggests risk_type + confidence
+   |
+Host calls preflight_request
+   |
+PromptIT inspects request + repo
+   |
+PromptIT combines host signal + local repo signals
+   |
+Hard policies make the final decision
+   |
+safe/normal -> skip or allow
+risky      -> warn, needs_confirmation, or block
+   |
+Host follows decision before editing
+```
+
+The host LLM can help interpret vague language like "ship this" or "make it live", but it cannot override hard PromptIT rules. For example, secret-looking diffs still `block`, and database migrations on `main` or `master` still `block`.
+
+Example response:
+
+```json
+{
+  "protocol": "promptit.preflight.v1",
+  "decision": "needs_confirmation",
+  "risk_type": "database_migration",
+  "local_risk_type": "database_migration",
+  "host_classification": null,
+  "severity": "high",
+  "evidence": [
+    "classified request as database_migration",
+    "current branch: main",
+    "migration files changed"
+  ],
+  "required_checks": [
+    "inspect existing migration history",
+    "confirm rollback or reversible migration plan",
+    "run migration/database tests if available",
+    "do not push until user confirms migration safety"
+  ],
+  "host_instruction": "..."
+}
+```
+
+## MCP Tools
+
+- `preflight_request`: classify risk, inspect repo state, and return a safety decision.
+
+The runtime MCP surface intentionally does not expose prompt rewriting tools.
+
+Tool input:
+
+```json
+{
+  "request": "ship this today",
+  "repo_path": "/absolute/path/to/repo",
+  "host_classification": {
+    "risk_type": "production_deploy",
+    "confidence": 0.86,
+    "summary": "The phrase ship this likely means release or deploy work."
+  }
+}
+```
+
+`repo_path` and `host_classification` are optional. If the host cannot pass `repo_path`, PromptIT falls back to `PROMPTIT_TARGET_REPO` and then the current working directory.
+
+## Repo Facts Inspected
+
+- Git branch
+- Dirty/staged files
+- Changed file paths
+- Package manager
+- Test/build/check scripts
+- CI config presence
+- Migration/auth/deploy/dependency file changes
+- Secret-looking strings in tracked diffs
+
+PromptIT does not return raw diff contents.
+
+## Data Policy
+
+PromptIT is stateless by default. It does not use a database and does not store raw prompts, generated prompts, file contents, diffs, repo facts, decisions, outcomes, or secrets.
+
+Secret scanning only counts secret-looking matches in tracked git diffs. PromptIT never returns the matched secret text.
 
 ## Quick Start
 
 ```bash
 bun install
-bun run promptit -- --codex --preset developer
+bun run promptit -- setup
 bun run start
 ```
 
-## MCP Host Setup
-
-PromptIT ships as a stdio MCP server. After installing dependencies, use the `promptit` installer command for your MCP host:
+For a specific host:
 
 ```bash
-promptit --codex --preset developer
-promptit --claude --categories coding,technical-writing
-promptit --cursor --preset writer
-promptit --host my-host --print-config
+promptit --codex
+promptit --claude
+promptit --host cursor --print-config
 ```
 
-`promptit --codex` updates `~/.codex/config.toml` with a managed PromptIT block. `promptit --claude` updates Claude Desktop's `claude_desktop_config.json`. Unknown hosts write a generic `promptit.<host>.mcp.json` file in this repo.
-
-PromptIT does not have to load every prompts.chat category. Pick what the user needs:
+If the binary is not linked globally:
 
 ```bash
-promptit categories
-promptit sync --preset developer --limit 1
-promptit sync --categories coding,writing,business --limit 1
-promptit sync --resume
-promptit doctor
+bun run promptit -- --codex
 ```
 
-Available presets are `developer`, `writer`, `business`, `creative`, `productivity`, and `all`. Prefer a focused preset over `all` because prompts.chat rate-limits category syncs.
+## Host Policy
 
-If you do not have the binary linked globally yet, run the same installer through Bun:
+Generated host instructions tell the agent:
+
+1. Silently classify the request into a likely PromptIT `risk_type` with confidence and a short summary.
+2. Call `prompt_it.preflight_request` before any non-tiny coding request.
+3. Pass the active workspace path as `repo_path` when available.
+4. Pass the host classification as `host_classification`.
+5. Proceed normally for `skip` or `allow`.
+6. Apply `host_instruction` for `warn`.
+7. Ask for confirmation for `needs_confirmation`.
+8. Stop for `block`.
+
+PromptIT should stay silent for ordinary low-risk coding tasks.
+
+## Development
 
 ```bash
-bun run promptit -- --codex --preset developer
-bun run promptit -- --claude --categories coding,technical-writing
-```
-
-You can still generate a config snippet manually and add it to the host you want to use:
-
-```bash
-bash scripts/render-codex-config.sh
-```
-
-Write the rendered snippet to a local file if you want to inspect it first:
-
-```bash
-bash scripts/render-codex-config.sh --output ./promptit.codex.toml
-```
-
-The rendered config follows this shape:
-
-```toml
-[mcp_servers.prompt_it]
-command = "bun"
-args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
-cwd = "/YOUR/ABSOLUTE/PATH"
-
-[mcp_servers.prompt_it.env]
-PROMPTIT_DB_PATH = "/YOUR/ABSOLUTE/PATH/data/promptit.db"
-
-[agents.prompt_engineer]
-description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
-mcp_servers = ["prompt_it"]
-developer_instructions = """
-You are the orchestration layer only.
-Follow PROMPTENGINEER.md as the single source of truth for refinement policy.
-For each messy request:
-0. For medium/large/ambiguous tasks, do not run web search, file edits, code execution, or any other tool before normalize_prompt.
-0b. Tiny mechanical tasks may skip PromptIT.
-1. Call prompt_it.normalize_prompt with messy_text.
-2. If status is needs_host_refinement, use conversion_context.payload to generate converted_prompt with the host LLM.
-3. Call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt.
-4. Show Converted Prompt and concise edit/regenerate/send actions.
-5. Use prompt_it.regenerate_prompt when the user requests changes.
-6. When approved, call prompt_it.commit_prompt with final_prompt and destination.
-7. Execute/send the returned final_prompt.
-"""
-```
-
-## Tool Runtime Flow
-
-```text
-[User Messy Prompt]
-       |
-       v
-[Host App / MCP Client] -- normalize_prompt --> [PromptIT MCP Server]
-       |                                             |
-       |                                             v
-       |                              [Template cache + template stats]
-       |                                             |
-       |                                             v
-[Host LLM receives selected template + messy request]
-       |
-       v
-[Host UI Plan/Review Screen] <-- promptit.review.v1 payload
-       |
-       +--> optional user edit
-       +--> optional regenerate_prompt
-       |
-       v
-[User Clicks Execute] -- commit_prompt --> [Template stats updated]
-       |
-       v
-[Host sends final_prompt to main agent]
-```
-
-## Server Role
-
-- `normalize_prompt`: select a prompts.chat-style template and return host-LLM refinement context; when called with `converted_prompt`, return the review payload.
-- `regenerate_prompt`: update the review session when the user asks for a different version and increment template regeneration stats.
-- `commit_prompt`: approve the current or user-edited prompt, update aggregate template stats, and return `final_prompt` for the host to send.
-- `sync_prompts_chat`: fetch prompts.chat templates, normalize and validate them, then upsert valid templates into the local SQLite template cache.
-- `bootstrap_prompts_chat`: seed the local cache with a small prompts.chat starter set, defaulting to 1 template per public prompts.chat category.
-PromptIT does not run a generative model, does not run embeddings, does not store raw messy prompts, and does not own final delivery.
-
-## Template Ingestion
-
-On server startup, PromptIT starts a best-effort prompts.chat bootstrap sync in the background. It tries to import 1 template from each known public prompts.chat category; if prompts.chat is slow or rate-limited, the MCP server still starts and falls back to local/default templates.
-
-Run `bootstrap_prompts_chat` from an MCP host, or run `bun run prompts:chat:sync -- --bootstrap --templates-per-category 1`, to manually retry setup. Run `sync_prompts_chat`, or `bun run prompts:chat:sync -- --dry-run`, to search targeted prompts.chat categories and import valid template metadata into SQLite. The sync defaults to `https://prompts.chat/api/mcp`; set `PROMPTS_API_KEY` if your prompts.chat access requires auth.
-
-PromptIT must not call prompts.chat `improve_prompt`. prompts.chat is used for template discovery/search only; the host LLM performs refinement and PromptIT wraps that result in the review/approval flow.
-
-PromptIT should not aggressively mirror all prompts.chat prompts. It uses light category bootstrap, stores derived routing/refinement metadata, and keeps full prompt refinement work inside the host LLM. As users approve and execute prompts, PromptIT stores category counters only; repeated usage can trigger small background syncs for that category.
-
-For security, custom `server_url` values are rejected unless they use HTTPS and match `https://prompts.chat/api/mcp`, `PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS`, or `PROMPTIT_ALLOWED_MCP_ORIGINS`.
-
-```json
-{
-  "keywords": ["engineering", "review", "architecture"],
-  "limit": 25,
-  "dry_run": true
-}
-```
-
-Manual first-run bootstrap:
-
-```bash
-bun run promptit -- sync --preset developer --limit 1
-```
-
-Manual category sync:
-
-```bash
-bun run promptit -- sync --categories coding --limit 3
-```
-
-## Review Payload Shape
-
-```json
-{
-  "protocol": "promptit.review.v1",
-  "status": "ready_for_review",
-  "task_id": "...",
-  "execution_token": "...",
-  "original_prompt": "...",
-  "converted_prompt": "...",
-  "selected_template": {
-    "id": "prompts-chat.coding-change.v1",
-    "name": "Coding Change Request",
-    "source": "prompts.chat",
-    "score": 0.8125,
-    "reasons": ["intent:coding", "matched:code,repo,build"]
-  },
-  "actions": ["edit", "regenerate", "send"],
-  "tools": {
-    "regenerate": "regenerate_prompt",
-    "send": "commit_prompt"
-  }
-}
-```
-
-## Data Policy
-
-PromptIT persists only template metadata and aggregate template stats by default. It does not persist raw user prompts, generated prompts, chat history, or execution logs.
-
-## Token/Cost Visibility
-
-`commit_prompt` returns an estimated token comparison for the in-memory messy prompt and final prompt. Optional cost estimation is enabled by setting:
-
-```bash
-PROMPTIT_INPUT_COST_PER_1K=0.005
+bun test
+./node_modules/.bin/tsc --noEmit
+npm run build
 ```

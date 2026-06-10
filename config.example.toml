@@ -1,37 +1,30 @@
 # Render this snippet with `bun run config:codex` or
 # `bash scripts/render-codex-config.sh`, then add it to your MCP host config.
 # This repository intentionally does not commit active project-level MCP install files.
+# PromptIT is stateless: no database, no prompt history, and no stored repo facts.
 
 [mcp_servers.prompt_it]
 command = "bun"
 args = ["run", "/YOUR/ABSOLUTE/PATH/src/server.ts"]
 cwd = "/YOUR/ABSOLUTE/PATH"
 
-[mcp_servers.prompt_it.env]
-PROMPTIT_DB_PATH = "/YOUR/ABSOLUTE/PATH/data/promptit.db"
-# Optional prompts.chat sync config:
-# PROMPTS_CHAT_MCP_URL = "https://prompts.chat/api/mcp"
-# PROMPTS_API_KEY = "YOUR_PROMPTS_CHAT_API_KEY"
-# PROMPTIT_ALLOWED_PROMPTS_CHAT_URLS = "https://prompts.chat/api/mcp"
-# PROMPTIT_ALLOWED_MCP_ORIGINS = "https://prompts.chat"
-# Set to "1" if you want to disable best-effort startup bootstrap sync.
-# PROMPTIT_DISABLE_BOOTSTRAP_SYNC = "1"
+# Optional: default repo path when the host cannot pass repo_path explicitly.
+# [mcp_servers.prompt_it.env]
+# PROMPTIT_TARGET_REPO = "/YOUR/PROJECT/PATH"
 
-[agents.prompt_engineer]
-description = "Specialist in converting messy user thoughts into high-fidelity expert system prompts."
+[agents.promptit_preflight]
+description = "Safety preflight for risky AI coding agent workflows."
 mcp_servers = ["prompt_it"]
 developer_instructions = """
 You are the orchestration layer only.
-Follow PROMPTENGINEER.md as the single source of truth for refinement policy.
-For each messy request:
-0. For medium/large/ambiguous tasks, do not run web search, file edits, code execution, or any other tool before normalize_prompt.
-0b. Tiny mechanical tasks may skip PromptIT (single rename, one-line typo fix, quick grep/list/check).
-1. Call prompt_it.normalize_prompt with messy_text for all non-tiny tasks.
-2. If status is needs_host_refinement, refine conversion_context.payload according to PROMPTENGINEER.md using the selected prompts.chat-style template.
-3. Call prompt_it.normalize_prompt again with task_id, execution_token, messy_text, and converted_prompt, or call prompt_it.regenerate_prompt with converted_prompt during an existing review session.
-4. Print "Converted Prompt" and the refined prompt plus concise review actions.
-5. Do not print raw protocol payload/schema blocks to the user unless explicitly requested.
-6. If the user asks for changes, call prompt_it.regenerate_prompt with user_feedback, generate the revision, then call prompt_it.regenerate_prompt with converted_prompt.
-7. When approved, call prompt_it.commit_prompt with task_id, execution_token, final_prompt, and destination.
-8. Execute/send the returned final_prompt (not coding-only by default).
+Use PromptIT as a repo-aware safety preflight before risky coding work.
+Skip PromptIT for tiny mechanical tasks, simple questions, and ordinary low-risk edits.
+Before executing any non-tiny coding request:
+1. Silently classify the user's request into a likely PromptIT risk_type with confidence and a short summary.
+2. Silently call prompt_it.preflight_request with request set to the user's raw request, repo_path set to the active workspace path when available, and host_classification set to that classification.
+3. If decision is skip or allow, proceed normally.
+4. If decision is warn, apply host_instruction before editing and include required checks in your work.
+5. If decision is needs_confirmation, show the user the risk summary and required checks, then wait for confirmation before dangerous actions.
+6. If decision is block, do not continue until the blocking condition is resolved.
+Do not use PromptIT to rewrite normal prompts. PromptIT is a safety gate, not a prompt cleaner.
 """
