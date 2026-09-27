@@ -1,35 +1,64 @@
-```text
-██████╗ ██████╗  ██████╗ ███╗   ███╗██████╗ ████████╗██╗████████╗
-██╔══██╗██╔══██╗██╔═══██╗████╗ ████║██╔══██╗╚══██╔══╝██║╚══██╔══╝
-██████╔╝██████╔╝██║   ██║██╔████╔██║██████╔╝   ██║   ██║   ██║
-██╔═══╝ ██╔══██╗██║   ██║██║╚██╔╝██║██╔═══╝    ██║   ██║   ██║
-██║     ██║  ██║╚██████╔╝██║ ╚═╝ ██║██║        ██║   ██║   ██║
-╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚═╝        ╚═╝   ╚═╝   ╚═╝
-```
-
 # PromptIT MCP Server
 
 PromptIT is a local-first MCP safety preflight for AI coding agents. It checks a user request against live repo state before the agent starts risky work, then returns `skip`, `allow`, `warn`, `needs_confirmation`, or `block`.
 
 PromptIT is not a prompt cleaner. It is a repo-aware risk gate for dangerous coding workflows.
 
+## Quick Start
+
+Requires Git and Bun. The repository's CI uses Bun **1.3.12**. Start from a source checkout:
+
+```sh
+git clone https://github.com/Nithish-Yenaganti/PromtIT.git
+cd PromtIT
+bun install --frozen-lockfile
+bun run promptit -- --help
+bun run promptit -- --host my-host --print-config
+```
+
+The last command prints an MCP configuration and host instructions without changing your host settings. Add the configuration and instructions to your MCP client, then restart the client. The generated paths point to this checkout, so keep it in a stable location.
+
+From your MCP client, call `preflight_request` with an absolute path to the repository you want to inspect:
+
+```json
+{
+  "request": "add a database migration",
+  "repo_path": "/absolute/path/to/your/repository"
+}
+```
+
+On a repository with a commit checked out on `main` or `master`, expect `decision: "block"` and a branch-specific reason in `evidence`. On a feature branch, a migration normally returns `needs_confirmation`; other repository signals can raise the risk further.
+
+The client launches the stdio server. If you run `bun run start` yourself, the process waits for MCP messages; it does not open a web page.
+
+### Optional host installers
+
+Preview a host-specific configuration first:
+
+```sh
+bun run promptit -- --codex --print-config
+bun run promptit -- --claude --print-config
+```
+
+These commands apply it and create a backup of an existing host configuration:
+
+```sh
+bun run promptit -- setup --codex
+# Or, for Claude Desktop on macOS:
+bun run promptit -- setup --claude
+```
+
+Restart the selected host after installation. `bun run promptit -- doctor` reports the runtime, server file, and host configuration presence; it is not an end-to-end connection test.
+
+## Enforcement and Limitations
+
+PromptIT returns a policy decision. It does not intercept shell commands, revoke permissions, or prevent an agent from bypassing the tool. The host must call it before acting and honor the response. Changes after a preflight require a fresh check.
+
+Classification uses request text, local repository signals, and an optional host classification. It can miss risks or flag harmless changes. Secret detection is pattern-based and currently scans the **unstaged tracked diff**; staged-only changes, untracked file contents, and committed history are not scanned for secret values. An `allow` response is not a security audit.
+
 ## Why MCP?
 
-PromptIT needs MCP because it is not just advice written in a file. It needs to inspect live repo state, read git status, detect changed migration/auth/deploy/dependency files, scan diffs for secret-looking values, and return a structured decision that the host can enforce before the agent acts.
-
-That makes it a tool, not only an instruction. MCP gives PromptIT a callable boundary where the host can ask, "Is this request safe to execute right now in this repo?" and receive a machine-readable answer like `allow`, `warn`, `needs_confirmation`, or `block`.
-
-## Why Not Just SKILL.md?
-
-A `SKILL.md` file is useful for teaching an agent how to behave, but it is still mostly guidance. It can say "be careful with migrations" or "check for secrets," but it cannot reliably inspect the current repository, count dirty files, detect the active branch, or produce a consistent policy decision on its own.
-
-PromptIT and `SKILL.md` can work together, but they solve different problems. `SKILL.md` is like a driving lesson; PromptIT is like the seat belt and warning system that checks the actual car before you start moving.
-
-## Why Choose PromptIT?
-
-People should choose PromptIT when they want AI coding agents to move fast without blindly touching dangerous parts of a codebase. It is especially useful for teams or solo developers who let agents edit, test, commit, push, deploy, modify dependencies, or change database/auth/security code.
-
-The seat belt example is the simplest way to think about it: a good driver still wears a seat belt, not because they are bad at driving, but because one mistake can be expensive. Modern coding agents are strong, but PromptIT adds a safety layer for the moments where one wrong action can leak a secret, break production, damage a schema, or push risky changes from the wrong branch.
+MCP lets the host request a structured decision based on live repository state, rather than relying only on written guidance. Instructions can tell an agent to inspect Git state; PromptIT implements repeatable checks and returns evidence the host can act on. Use it alongside the host's permissions, tests, and review process.
 
 ## What It Catches
 
@@ -107,28 +136,27 @@ Host follows decision before editing
 
 The host LLM can help interpret vague language like "ship this" or "make it live", but it cannot override hard PromptIT rules. For example, secret-looking diffs still `block`, and database migrations on `main` or `master` still `block`.
 
-Example response:
+Example response excerpt for a migration on `main` (additional repository facts and host instructions omitted):
 
 ```json
 {
   "protocol": "promptit.preflight.v1",
-  "decision": "needs_confirmation",
+  "decision": "block",
   "risk_type": "database_migration",
   "local_risk_type": "database_migration",
   "host_classification": null,
   "severity": "high",
   "evidence": [
+    "database migration risk detected on main/master branch",
     "classified request as database_migration",
-    "current branch: main",
-    "migration files changed"
+    "current branch: main"
   ],
   "required_checks": [
     "inspect existing migration history",
     "confirm rollback or reversible migration plan",
     "run migration/database tests if available",
     "do not push until user confirms migration safety"
-  ],
-  "host_instruction": "..."
+  ]
 }
 ```
 
@@ -163,7 +191,7 @@ Tool input:
 - Test/build/check scripts
 - CI config presence
 - Migration/auth/deploy/dependency file changes
-- Secret-looking strings in tracked diffs
+- Secret-looking strings in the unstaged tracked diff
 
 PromptIT does not return raw diff contents.
 
@@ -171,29 +199,7 @@ PromptIT does not return raw diff contents.
 
 PromptIT is stateless by default. It does not use a database and does not store raw prompts, generated prompts, file contents, diffs, repo facts, decisions, outcomes, or secrets.
 
-Secret scanning only counts secret-looking matches in tracked git diffs. PromptIT never returns the matched secret text.
-
-## Quick Start
-
-```bash
-bun install
-bun run promptit -- setup
-bun run start
-```
-
-For a specific host:
-
-```bash
-promptit --codex
-promptit --claude
-promptit --host cursor --print-config
-```
-
-If the binary is not linked globally:
-
-```bash
-bun run promptit -- --codex
-```
+Secret scanning only counts secret-looking matches in the unstaged tracked Git diff. PromptIT never returns the matched secret text.
 
 ## Host Policy
 
@@ -217,3 +223,11 @@ bun test
 ./node_modules/.bin/tsc --noEmit
 npm run build
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and the information to include in a bug report or pull request.
+
+## License
+
+[MIT](LICENSE).
